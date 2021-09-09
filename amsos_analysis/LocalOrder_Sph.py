@@ -4,6 +4,8 @@ from numpy.lib.recfunctions import structured_to_unstructured
 import scipy.spatial as ss
 import meshzoo
 import meshio
+from numba import njit, jit, prange
+import time
 
 import Util.AMSOS as am
 
@@ -41,32 +43,73 @@ print(center, Rc, radAve, nseg, mesh_order, foldername, volAve)
 
 am.mkdir(foldername)
 
-
-def e_t(vec):
-    '''calc norm vector e_theta, vec must be on a sphere centered at [0,0,0]'''
-    rxy = np.linalg.norm(vec[:2])
-    if rxy < 1e-7:
-        return np.array([1, 0, 0])  # pole singularity
-    z = vec[2]
-    ev = np.array([z*vec[0]/rxy, z*vec[1]/rxy, -rxy])
-    ev = ev / np.linalg.norm(ev)
-    return ev
-
-
-def e_r(vec):
-    '''calc norm vector e_r, vec must be on a sphere centered at [0,0,0]'''
-    er = vec/np.linalg.norm(vec)
-    return er
-
-
 points, cells = meshzoo.icosa_sphere(mesh_order)
 
-etheta = np.zeros((points.shape[0], 3))  # e_theta norm vectors
+er, etheta, ep = am.e_sph(xyz=points)
+
 for i in range(points.shape[0]):
     p = points[i, :]
-    etheta[i, :] = e_t(p)
     p = p*Rc
     points[i, :] = p+center
+
+
+def ll2array(listoflist, dtype, padding):
+    n = len(max(listoflist, key=len))
+    lst_2 = [x + [padding]*(n-len(x)) for x in listoflist]
+
+    return np.array(lst_2, dtype=dtype)
+
+
+@njit(parallel=True)
+def calcT(N: int, volAve: float, search, seg_vec, seg_len, etheta):
+    volfrac = np.zeros(N)
+    nematic = np.zeros(N)
+    polarity_theta = np.zeros(N)
+    polarity = np.zeros((N, 3))
+    for i in prange(N):
+        idx = []
+        for id in search[i]:
+            if id != -1:
+                idx.append(id)
+            else:
+                break
+
+        if len(idx) != 0:
+            vecList = np.zeros((len(idx), 3))
+            len_sum = 0
+            for k in range(len(idx)):
+                id = idx[k]
+                vecList[k] = seg_vec[id]
+                len_sum += seg_len[id]
+            volfrac[i] = am.volMT(0.0125, len_sum)/volAve
+            nematic[i] = am.calcNematicS_numba(vecList)
+            polarity[i] = am.calcPolarP_numba(vecList)
+            polarity_theta[i] = np.dot(polarity[i], etheta[i])
+
+    return (volfrac, nematic, polarity, polarity_theta)
+
+
+@njit(parallel=True)
+def calcP(N: int, volAve: float, search, Pbind):
+    xlinker_n_all = np.zeros(N)
+    xlinker_n_db = np.zeros(N)
+    for i in prange(N):
+        idx = []
+        for id in search[i]:
+            if id != -1:
+                idx.append(id)
+            else:
+                break
+
+        if len(idx) != 0:
+            xlinker_n_all[i] = len(idx)/volAve
+            xlinker_n_db[i] = 0
+            for id in idx:
+                if Pbind[id, 0] != -1 and Pbind[id, 1] != -1:
+                    xlinker_n_db[i] += 1
+            xlinker_n_db[i] /= volAve
+
+    return (xlinker_n_all, xlinker_n_db)
 
 
 def calcLocalOrder(frame, pts, rad):
@@ -86,6 +129,8 @@ def calcLocalOrder(frame, pts, rad):
     seg_vec = np.zeros((nseg*NMT, 3))
     seg_len = np.zeros(nseg*NMT)
 
+    Npts = pts.shape[0]
+
     for i in range(nseg):
         seg_center[i*NMT:(i+1)*NMT, :] = Tm+((i+0.5)*1.0/nseg) * Tvec
         seg_vec[i*NMT:(i+1)*NMT, :] = Tdct
@@ -93,44 +138,28 @@ def calcLocalOrder(frame, pts, rad):
 
     tree = ss.cKDTree(seg_center)
     search = tree.query_ball_point(pts, rad, workers=-1, return_sorted=False)
-    N = pts.shape[0]
-    volfrac = np.zeros(N)
-    nematic = np.zeros(N)
-    polarity = np.zeros((N, 3))
-    polarity_theta = np.zeros(N)
-    for i in range(N):
-        idx = search[i]
-        if len(idx) == 0:
-            volfrac[i] = 0
-            polarity[i, :] = np.array([0, 0, 0])
-            polarity_theta[i] = 0
-            nematic[i] = 0
-        else:
-            vecList = seg_vec[idx]
-            volfrac[i] = am.volMT(0.0125, np.sum(seg_len[idx]))/volAve
-            polarity[i, :] = am.calcPolarP(vecList)
-            polarity_theta[i] = np.dot(polarity[i], etheta[i])
-            nematic[i] = am.calcNematicS(vecList)
+    search = ll2array(search, int, -1)
+
+    start = time.time()  # start time
+    volfrac, nematic, polarity, polarity_theta = calcT(
+        Npts, volAve, search, seg_vec, seg_len, etheta)
+    end = time.time()
+    print("T time is  {}".format(end-start))
 
     PList = frame.PList
     Pm = structured_to_unstructured(PList[['mx', 'my', 'mz']])
     Pp = structured_to_unstructured(PList[['px', 'py', 'pz']])
     Pbind = structured_to_unstructured(PList[['idbind0', 'idbind1']])
-    xlinker_n_all = np.zeros(N)
-    xlinker_n_db = np.zeros(N)
+
     centers = 0.5*(Pm+Pp)
     tree = ss.cKDTree(centers)
     search = tree.query_ball_point(pts, rad, workers=-1, return_sorted=False)
-    for i in range(N):
-        idx = search[i]
-        if len(idx) == 0:
-            xlinker_n_all[i] = 0
-            xlinker_n_db[i] = 0
-        else:
-            xlinker_n_all[i] = len(idx)/volAve
-            xList = Pbind[idx]
-            xlinker_n_db[i] = np.count_nonzero(np.logical_and(
-                xList[:, 0] != -1, xList[:, 1] != -1))/volAve
+    search = ll2array(search, int, -1)
+
+    start = time.time()  # start time
+    xlinker_n_all, xlinker_n_db = calcP(Npts, volAve, search, Pbind)
+    end = time.time()
+    print("P time is  {}".format(end-start))
 
     name = am.get_basename(frame.filename)
     meshio.write_points_cells(foldername+"/sphere_{}.vtu".format(name), points,
@@ -142,10 +171,15 @@ def calcLocalOrder(frame, pts, rad):
                                           'xlinker_n_all': xlinker_n_all,
                                           'xlinker_n_db': xlinker_n_db
                                           })
+    return
 
 
-SylinderFileList = am.getFileListSorted('./result*-*/SylinderAscii_*.dat')
+SylinderFileList = am.getFileListSorted(
+    './result*-*/SylinderAscii_*.dat', info=False)
 
-for file in SylinderFileList:
+for file in SylinderFileList[10:11]:
     frame = am.FrameAscii(file, readProtein=True, sort=False, info=True)
     calcLocalOrder(frame, points, radAve)
+
+# Parallel(n_jobs=2, max_nbytes=1e5)(delayed(calcLocalOrder)(
+#     am.FrameAscii(f, readProtein=True, sort=True, info=False), points, radAve) for f in SylinderFileList[:12])

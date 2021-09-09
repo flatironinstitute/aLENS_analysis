@@ -37,14 +37,16 @@ def e_sph(xyz):
     et = np.vstack([np.cos(theta)*np.cos(phi), np.cos(theta)
                    * np.sin(phi), -np.sin(theta)])
     ep = np.vstack([-np.sin(phi), np.cos(phi), np.zeros(phi.shape[0])])
-    return er.T, et.T, ep.T
+    return np.ascontiguousarray(er.T), np.ascontiguousarray(et.T), np.ascontiguousarray(ep.T)
 
 
+@nb.njit
 def volCyl(rad, h):
     '''cylinder volume'''
     return np.pi*(rad**2)*h
 
 
+@nb.njit
 def volMT(rad, h):
     '''spherocylinder volume'''
     return volCyl(rad, h) + (4.0/3.0)*np.pi*(rad**3)
@@ -120,7 +122,7 @@ def getAdjacencyMatrixFromPairs(pairs, N, info=False,
     return nbMat
 
 
-@nb.njit(parallel=True)
+@nb.njit
 def normalize(vec):
     '''vec must be a numpy array'''
     return vec/np.sqrt(vec.dot(vec))
@@ -173,7 +175,7 @@ def calcNematicS(PList, weight=None):
     return S
 
 
-@nb.njit(parallel=True)
+@nb.njit
 def calcNematicS_numba(PList):
     '''PList must be a numpy array with shape (N,3), each row normalized'''
     # calc orientation
@@ -207,7 +209,7 @@ def calcPolarP(PList, weight=None):
     return polarOrder
 
 
-@nb.njit(parallel=True)
+@nb.njit
 def calcPolarP_numba(PList):
     assert PList.shape[1] == 3
     '''PList must be a numpy array with shape (N,3), each row normalized'''
