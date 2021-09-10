@@ -5,7 +5,7 @@ import scipy.spatial as ss
 import meshzoo
 import meshio
 from numba import njit, jit, prange
-import time
+from codetiming import Timer
 
 import Util.AMSOS as am
 
@@ -60,7 +60,7 @@ def ll2array(listoflist, dtype, padding):
     return np.array(lst_2, dtype=dtype)
 
 
-@njit(parallel=True)
+@njit(parallel=True, nogil=True)
 def calcT(N: int, volAve: float, search, seg_vec, seg_len, etheta):
     volfrac = np.zeros(N)
     nematic = np.zeros(N)
@@ -89,7 +89,7 @@ def calcT(N: int, volAve: float, search, seg_vec, seg_len, etheta):
     return (volfrac, nematic, polarity, polarity_theta)
 
 
-@njit(parallel=True)
+@njit(parallel=True, nogil=True)
 def calcP(N: int, volAve: float, search, Pbind):
     xlinker_n_all = np.zeros(N)
     xlinker_n_db = np.zeros(N)
@@ -112,7 +112,8 @@ def calcP(N: int, volAve: float, search, Pbind):
     return (xlinker_n_all, xlinker_n_db)
 
 
-def calcLocalOrder(frame, pts, rad):
+def calcLocalOrder(file, pts, rad):
+    frame = am.FrameAscii(file, readProtein=True, sort=False, info=True)
     '''pts: sample points, rad: average radius'''
     # step1: build cKDTree with TList center
     # step2: sample the vicinity of every pts
@@ -136,15 +137,15 @@ def calcLocalOrder(frame, pts, rad):
         seg_vec[i*NMT:(i+1)*NMT, :] = Tdct
         seg_len[i*NMT:(i+1)*NMT] = Tlen/nseg
 
-    tree = ss.cKDTree(seg_center)
-    search = tree.query_ball_point(pts, rad, workers=-1, return_sorted=False)
+    with Timer(name="treeT"):
+        tree = ss.KDTree(seg_center)
+        search = tree.query_ball_point(
+            pts, rad, workers=-1, return_sorted=False)
     search = ll2array(search, int, -1)
 
-    start = time.time()  # start time
-    volfrac, nematic, polarity, polarity_theta = calcT(
-        Npts, volAve, search, seg_vec, seg_len, etheta)
-    end = time.time()
-    print("T time is  {}".format(end-start))
+    with Timer(name="calcT"):
+        volfrac, nematic, polarity, polarity_theta = calcT(
+            Npts, volAve, search, seg_vec, seg_len, etheta)
 
     PList = frame.PList
     Pm = structured_to_unstructured(PList[['mx', 'my', 'mz']])
@@ -152,14 +153,14 @@ def calcLocalOrder(frame, pts, rad):
     Pbind = structured_to_unstructured(PList[['idbind0', 'idbind1']])
 
     centers = 0.5*(Pm+Pp)
-    tree = ss.cKDTree(centers)
-    search = tree.query_ball_point(pts, rad, workers=-1, return_sorted=False)
+    with Timer(name="treeP"):
+        tree = ss.KDTree(centers)
+        search = tree.query_ball_point(
+            pts, rad, workers=-1, return_sorted=False)
     search = ll2array(search, int, -1)
 
-    start = time.time()  # start time
-    xlinker_n_all, xlinker_n_db = calcP(Npts, volAve, search, Pbind)
-    end = time.time()
-    print("P time is  {}".format(end-start))
+    with Timer(name="calcP"):
+        xlinker_n_all, xlinker_n_db = calcP(Npts, volAve, search, Pbind)
 
     name = am.get_basename(frame.filename)
     meshio.write_points_cells(foldername+"/sphere_{}.vtu".format(name), points,
@@ -171,6 +172,7 @@ def calcLocalOrder(frame, pts, rad):
                                           'xlinker_n_all': xlinker_n_all,
                                           'xlinker_n_db': xlinker_n_db
                                           })
+    print(Timer.timers)
     return
 
 
@@ -178,8 +180,7 @@ SylinderFileList = am.getFileListSorted(
     './result*-*/SylinderAscii_*.dat', info=False)
 
 for file in SylinderFileList[10:11]:
-    frame = am.FrameAscii(file, readProtein=True, sort=False, info=True)
-    calcLocalOrder(frame, points, radAve)
+    calcLocalOrder(file, points, radAve)
 
 # Parallel(n_jobs=2, max_nbytes=1e5)(delayed(calcLocalOrder)(
 #     am.FrameAscii(f, readProtein=True, sort=True, info=False), points, radAve) for f in SylinderFileList[:12])
