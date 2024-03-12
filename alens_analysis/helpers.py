@@ -10,6 +10,7 @@ Description:
 import numpy as np
 
 import time
+import torch
 
 
 class Timer:
@@ -97,41 +98,34 @@ def find_steady_state_ind(arr, avg_inv=(0, None)):
     return (arr <= (avg + std)).nonzero()[0][0]
 
 
-def apply_pbc_to_sylinder(syl, box_lower, box_upper):
-    """Make sure sylinder is the proper length and in the box."""
-    # Need to make copies of array to vectorize
-    minus_end = np.array(syl[2:5])
-    plus_end = np.array(syl[5:8])
-    vec = plus_end - minus_end
-    box_vec = box_upper - box_lower
+def apply_pbc_to_raw_syl_data(sy_dat, box_lower, box_upper, device='cpu'):
+    # Apply periodic boundary conditions
+    # This function applies periodic boundary conditions to the raw sylinder data.
+    torch_dat = torch.from_numpy(sy_dat).to(device)
+    minus_ends = torch_dat[:, 2:5]
+    plus_ends = torch_dat[:, 5:8]
+    vecs = plus_ends - minus_ends
+    tbox_upper = torch.from_numpy(box_upper).to(device)
+    tbox_lower = torch.from_numpy(box_lower).to(device)
+    tbox_vec = tbox_upper - tbox_lower
+    max_norm = torch.norm(vecs, dim=1).max()
+    # print(device)
+    if max_norm < 0.5*tbox_vec.min():
+        print("No PBC needed")
+        return sy_dat
+    
     # Adjust the plus end to satisfy PBC
-    for i in range(3):
-        if vec[i] > 0.5 * box_vec[i]:
-            plus_end[i] -= box_vec[i]
-        elif vec[i] < -0.5 * box_vec[i]:
-            plus_end[i] += box_vec[i]
+    plus_ends = torch.where(vecs > 0.5*tbox_vec[None,:,None], plus_ends-tbox_vec[None, :, None], plus_ends)
+    plus_ends = torch.where(vecs < -0.5*tbox_vec[None,:,None], plus_ends+tbox_vec[None, :, None], plus_ends)
 
-    # Make sure the sylinder is still in the box
-    syl_center = .5 * (plus_end + minus_end)
-    for i in range(3):
-        if syl_center[i] > box_upper[i]:
-            plus_end[i] -= box_vec[i]
-            minus_end[i] -= box_vec[i]
-        elif syl_center[i] < box_lower[i]:
-            plus_end[i] += box_vec[i]
-            minus_end[i] += box_vec[i]
+    syl_center = .5 * (plus_ends + minus_ends)
 
-    return np.concatenate((syl[:2], minus_end, plus_end, syl[8:]))
+    plus_ends = torch.where(syl_center > tbox_upper[None,:,None], plus_ends - tbox_vec[None,:,None], plus_ends)
+    minus_ends = torch.where(syl_center > tbox_upper[None,:,None], minus_ends - tbox_vec[None,:,None], minus_ends)
 
+    plus_ends = torch.where(syl_center < tbox_lower[None,:,None], plus_ends + tbox_vec[None,:,None], plus_ends)
+    minus_ends = torch.where(syl_center < tbox_lower[None,:,None], minus_ends + tbox_vec[None,:,None], minus_ends)
+    print(torch_dat.shape)
 
-def apply_pbc_to_raw_syl_data(raw_syl, box_lower, box_upper):
-    """Make sure all sylinders are the proper length and in the box."""
-    vec_apply_pbc_to_sylinder = np.vectorize(
-        apply_pbc_to_sylinder, excluded=[
-            1, 2], signature='(n)->(n)')
-    # Need to reorder the array to vectorize. Move time dimension 'k' to the
-    # front
-    tmp = np.einsum('ijk->kij', raw_syl)
-    tmp = vec_apply_pbc_to_sylinder(tmp, box_lower, box_upper)
-    # Move time dimension back to the end
-    return np.einsum('kij->ijk', tmp)
+    return torch.cat([torch_dat[:,:2], minus_ends, plus_ends, torch_dat[:,8:]], dim=1).cpu().numpy()
+
