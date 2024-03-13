@@ -14,7 +14,6 @@ import torch
 
 
 class Timer:
-
     def __init__(self):
         self.start = time.time()
 
@@ -23,7 +22,7 @@ class Timer:
 
     def log(self):
         logger = time.time() - self.start
-        print('Time log -', logger)
+        print("Time log -", logger)
 
     def milestone(self):
         self.start = time.time()
@@ -44,7 +43,7 @@ def contiguous_regions(condition):
 
     # Find the indices of changes in "condition"
     diff = np.diff(condition.astype(int))
-    idx, = diff.nonzero()
+    (idx,) = diff.nonzero()
 
     # We need to start things after the change in "condition". Therefore,
     # we'll  shift the index by 1 to the right.
@@ -63,7 +62,7 @@ def contiguous_regions(condition):
 
 
 def collect_contiguous_intervals(arr, delta):
-    """ Collect and return different contiguous regions of an array. """
+    """Collect and return different contiguous regions of an array."""
     arr_deriv = np.gradient(arr, delta)
 
     # Get a matrix of indices. First column is starting point of positive
@@ -71,8 +70,8 @@ def collect_contiguous_intervals(arr, delta):
     contig_idx_arr = contiguous_regions(arr_deriv > 0)
     start_pos = contig_idx_arr[:, 0]
     end_pos = contig_idx_arr[:, 1]
-    pos_lengths = (end_pos - start_pos) * 1.
-    neg_lengths = (start_pos[1:] - end_pos[:-1]) * 1.
+    pos_lengths = (end_pos - start_pos) * 1.0
+    neg_lengths = (start_pos[1:] - end_pos[:-1]) * 1.0
 
     return arr_deriv, contig_idx_arr, pos_lengths, neg_lengths
 
@@ -89,8 +88,8 @@ def find_steady_state_ind(arr, avg_inv=(0, None)):
         _description_, by default (0,None)
     """
     arr = np.array(arr)
-    avg = arr[avg_inv[0]:avg_inv[1]].mean()
-    std = arr[avg_inv[0]:avg_inv[1]].std()
+    avg = arr[avg_inv[0] : avg_inv[1]].mean()
+    std = arr[avg_inv[0] : avg_inv[1]].std()
     # Reaching steady-state from a smaller value
     if avg > arr[0]:
         return (arr >= (avg - std)).nonzero()[0][0]
@@ -98,9 +97,9 @@ def find_steady_state_ind(arr, avg_inv=(0, None)):
     return (arr <= (avg + std)).nonzero()[0][0]
 
 
-def apply_pbc_to_raw_syl_data(sy_dat, box_lower, box_upper, device='cpu'):
-    # Apply periodic boundary conditions
+def apply_pbc_to_raw_syl_data(sy_dat, box_lower, box_upper, device="cpu"):
     # This function applies periodic boundary conditions to the raw sylinder data.
+
     torch_dat = torch.from_numpy(sy_dat).to(device)
     minus_ends = torch_dat[:, 2:5]
     plus_ends = torch_dat[:, 5:8]
@@ -109,23 +108,50 @@ def apply_pbc_to_raw_syl_data(sy_dat, box_lower, box_upper, device='cpu'):
     tbox_lower = torch.from_numpy(box_lower).to(device)
     tbox_vec = tbox_upper - tbox_lower
     max_norm = torch.norm(vecs, dim=1).max()
-    # print(device)
-    if max_norm < 0.5*tbox_vec.min():
+
+    if max_norm < 0.5 * tbox_vec.min():
         print("No PBC needed")
         return sy_dat
-    
+
     # Adjust the plus end to satisfy PBC
-    plus_ends = torch.where(vecs > 0.5*tbox_vec[None,:,None], plus_ends-tbox_vec[None, :, None], plus_ends)
-    plus_ends = torch.where(vecs < -0.5*tbox_vec[None,:,None], plus_ends+tbox_vec[None, :, None], plus_ends)
+    plus_ends = torch.where(
+        vecs > 0.5 * tbox_vec[None, :, None],
+        plus_ends - tbox_vec[None, :, None],
+        plus_ends,
+    )
+    plus_ends = torch.where(
+        vecs < -0.5 * tbox_vec[None, :, None],
+        plus_ends + tbox_vec[None, :, None],
+        plus_ends,
+    )
 
-    syl_center = .5 * (plus_ends + minus_ends)
+    syl_center = 0.5 * (plus_ends + minus_ends)
 
-    plus_ends = torch.where(syl_center > tbox_upper[None,:,None], plus_ends - tbox_vec[None,:,None], plus_ends)
-    minus_ends = torch.where(syl_center > tbox_upper[None,:,None], minus_ends - tbox_vec[None,:,None], minus_ends)
+    plus_ends = torch.where(
+        syl_center > tbox_upper[None, :, None],
+        plus_ends - tbox_vec[None, :, None],
+        plus_ends,
+    )
+    minus_ends = torch.where(
+        syl_center > tbox_upper[None, :, None],
+        minus_ends - tbox_vec[None, :, None],
+        minus_ends,
+    )
 
-    plus_ends = torch.where(syl_center < tbox_lower[None,:,None], plus_ends + tbox_vec[None,:,None], plus_ends)
-    minus_ends = torch.where(syl_center < tbox_lower[None,:,None], minus_ends + tbox_vec[None,:,None], minus_ends)
+    plus_ends = torch.where(
+        syl_center < tbox_lower[None, :, None],
+        plus_ends + tbox_vec[None, :, None],
+        plus_ends,
+    )
+    minus_ends = torch.where(
+        syl_center < tbox_lower[None, :, None],
+        minus_ends + tbox_vec[None, :, None],
+        minus_ends,
+    )
     print(torch_dat.shape)
 
-    return torch.cat([torch_dat[:,:2], minus_ends, plus_ends, torch_dat[:,8:]], dim=1).cpu().numpy()
-
+    return (
+        torch.cat([torch_dat[:, :2], minus_ends, plus_ends, torch_dat[:, 8:]], dim=1)
+        .cpu()
+        .numpy()
+    )
