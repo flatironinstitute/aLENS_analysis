@@ -16,6 +16,7 @@ import torch
 class Timer:
     def __init__(self):
         self.start = time.time()
+        self.begin = self.start
 
     def start(self):
         self.start = time.time()
@@ -26,6 +27,10 @@ class Timer:
 
     def milestone(self):
         self.start = time.time()
+
+    def log_total(self):
+        logger = time.time() - self.begin
+        print("Total time -", logger)
 
 
 def gen_id():

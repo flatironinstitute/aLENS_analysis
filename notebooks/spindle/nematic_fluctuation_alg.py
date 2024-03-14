@@ -13,6 +13,8 @@ import h5py
 import torch
 import numpy as np
 
+from alens_analysis.helpers import Timer
+
 import alens_analysis as aa
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -36,10 +38,7 @@ def analyze_nematic_info(
         protein_dict = yaml.load(h5_data.attrs["ProteinConfig"], Loader=yaml.FullLoader)
         box_lower = np.array(param_dict["simBoxLow"])
         box_upper = np.array(param_dict["simBoxHigh"])
-        time_arr = h5_data["time"][
-            :
-        ]  # Load in time array, [:] loads data as numpy array
-        # Load in sylinder data
+        time_arr = h5_data["time"][:]
         sy_dat = h5_data["raw_data/sylinders"][...]
 
     # Fix periodic boundary conditions
@@ -47,19 +46,27 @@ def analyze_nematic_info(
         sy_dat, box_lower, box_upper, device=device
     )
 
+    # Store time array
+    with h5py.File(h5_file.parent / "nematic_analysis.h5", "w") as h5_nem_data:
+        h5_nem_data.create_dataset("time", data=time_arr)
+
+    timer = Timer()
     # Calculate nematic order parameter
     nematic_order = aa.nematic_order.calc_nematic_order(sy_dat)
+    with h5py.File(h5_file.parent / "nematic_analysis.h5", "a") as h5_nem_data:
+        h5_nem_data.create_dataset("nematic_order", data=nematic_order)
+    print("Made nematic order array")
+    timer.log()
 
     # Calculate nematic director
-    nematic_director = aa.nematic_order.calc_nematic_director(sy_dat, device=device)
+    timer.milestone()
+    nematic_director = aa.nematic_order.calc_nematic_director_arr(sy_dat, device=device)
+    with h5py.File(h5_file.parent / "nematic_analysis.h5", "a") as h5_nem_data:
+        h5_nem_data.create_dataset("nematic_director", data=nematic_director)
+    print("Made nematic director array")
+    timer.log()
 
-    # Calculate structure factor and fluctuations
-    time_step = (len(time_arr) - ts_start) // n_time_points
-
-    Sx_time_arr = np.zeros((k_points, n_time_points))
-    Sy_time_arr = np.zeros((k_points, n_time_points))
-    Sz_time_arr = np.zeros((k_points, n_time_points))
-
+    # Calculate Q-tensor structure factor and fluctuations
     tk_arr = torch.logspace(-1, 2, k_points)
     tkx_arr = torch.vstack([tk_arr, torch.zeros(k_points), torch.zeros(k_points)]).T.to(
         device
@@ -71,41 +78,87 @@ def analyze_nematic_info(
         device
     )
 
+    com_arr = 0.5 * (sy_dat[:, 2:5, :] + sy_dat[:, 5:8, :])
+    tcom_arr = torch.from_numpy(com_arr).to(device)
+    dir_arr = sy_dat[:, 5:8, :] - sy_dat[:, 2:5, :]
+    tdir_arr = torch.from_numpy(dir_arr).to(device)
+
+    time_step = (len(time_arr) - ts_start) // n_time_points
+
+    # Full Q-tensor structure factor
+    timer.milestone()
+    Sx_time_arr = torch.zeros((k_points, n_time_points)).to(device)
+    Sy_time_arr = torch.zeros((k_points, n_time_points)).to(device)
+    Sz_time_arr = torch.zeros((k_points, n_time_points)).to(device)
     for i in range(n_time_points):
-        print(i)
-        com_arr = 0.5 * (
-            sy_dat[:, 2:5, ts_start + i * time_step]
-            + sy_dat[:, 5:8, ts_start + i * time_step]
+        time_ind = ts_start + i * time_step
+        tdir = tdir_arr[:, :, time_ind]
+        tcom = tcom_arr[:, :, time_ind]
+
+        tQ_arr = aa.nematic_order.make_nematic_tensor_arr(tdir, device)
+
+        Sx_time_arr[:, i] = aa.nematic_order.make_structure_factor_torch_fast(
+            tQ_arr, tcom, tkx_arr, device=device
         )
-        tcom_arr = torch.from_numpy(com_arr).to(device)
-        dir_arr = (
-            sy_dat[:, 5:8, ts_start + i * time_step]
-            - sy_dat[:, 2:5, ts_start + i * time_step]
+        Sy_time_arr[:, i] = aa.nematic_order.make_structure_factor_torch_fast(
+            tQ_arr, tcom, tky_arr, device=device
+        )
+        Sz_time_arr[:, i] = aa.nematic_order.make_structure_factor_torch_fast(
+            tQ_arr, tcom, tkz_arr, device=device
         )
 
-        tQ_arr = torch.from_numpy(aa.nematic_order.make_nematic_tensor_arr(dir_arr)).to(
-            device
-        )
-        tQ_arr -= tQ_arr.mean(axis=0)
-
-        for j in range(k_points):
-            Sx_time_arr[j, i] = aa.nematic_order.make_structure_factor_torch(
-                tQ_arr, tcom_arr, tkx_arr[j], device=device
-            )
-            Sy_time_arr[j, i] = aa.nematic_order.make_structure_factor_torch(
-                tQ_arr, tcom_arr, tky_arr[j], device=device
-            )
-            Sz_time_arr[j, i] = aa.nematic_order.make_structure_factor_torch(
-                tQ_arr, tcom_arr, tkz_arr[j], device=device
-            )
+    with h5py.File(h5_file.parent / "nematic_analysis.h5", "a") as h5_nem_data:
+        h5_nem_data.create_dataset("nematic_structure_x", data=Sx_time_arr.to("cpu"))
+        h5_nem_data.create_dataset("nematic_structure_y", data=Sy_time_arr.to("cpu"))
+        h5_nem_data.create_dataset("nematic_structure_z", data=Sz_time_arr.to("cpu"))
+    print("Made nematic structure factor array")
+    timer.log()
 
     # Calculate nematic fluctuations
+    timer.milestone()
+    dSx_time_arr = torch.zeros((k_points, n_time_points))
+    dSy_time_arr = torch.zeros((k_points, n_time_points))
+    dSz_time_arr = torch.zeros((k_points, n_time_points))
 
-    # Store data
-    #  time_arr
-    #  nematic_order
-    #  nematic_director
-    #  nematic_structure_factor
-    #  nematic_fluctuation
+    for i in range(n_time_points):
+        time_ind = ts_start + i * time_step
+        tdir = tdir_arr[:, :, time_ind]
+        tcom = tcom_arr[:, :, time_ind]
+
+        tQ_arr = aa.nematic_order.make_nematic_tensor_arr(tdir, device)
+        # We want to fluctuations
+        tQ_arr -= tQ_arr.mean(axis=0)
+
+        dSx_time_arr[:, i] = aa.nematic_order.make_structure_factor_torch_fast(
+            tQ_arr, tcom, tkx_arr, device=device
+        )
+        dSy_time_arr[:, i] = aa.nematic_order.make_structure_factor_torch_fast(
+            tQ_arr, tcom, tky_arr, device=device
+        )
+        dSz_time_arr[:, i] = aa.nematic_order.make_structure_factor_torch_fast(
+            tQ_arr, tcom, tkz_arr, device=device
+        )
+
+    with h5py.File(h5_file.parent / "nematic_analysis.h5", "a") as h5_nem_data:
+        h5_nem_data.create_dataset("nematic_fluctuation_x", data=dSx_time_arr.to("cpu"))
+        h5_nem_data.create_dataset("nematic_fluctuation_y", data=dSy_time_arr.to("cpu"))
+        h5_nem_data.create_dataset("nematic_fluctuation_z", data=dSz_time_arr.to("cpu"))
+    print("Made nematic fluctuation structure factor array")
+    timer.log()
+
+    timer.log_total()
 
     return
+
+
+if __name__ == "__main__":
+    data_dirs = 
+    for 
+    analyze_nematic_info(
+        Path(
+            "/home/alamson/DATA/Motor_Inference/NemN8000ld5rho.5dte-5/analysis/raw_data.h5"
+        ),
+        k_points=100,
+        n_time_points=3,
+        ts_start=100,
+    )

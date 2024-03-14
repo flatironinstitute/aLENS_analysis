@@ -41,7 +41,7 @@ def calc_nematic_order(syls):
     return np.array(nematic_order)
 
 
-def make_nematic_tensor_arr(direct_arr):
+def make_nematic_tensor_arr(direct_arr, device="cpu"):
     """Make the nematic tensor from a list of directors
     N x 3 array of directors
 
@@ -49,10 +49,11 @@ def make_nematic_tensor_arr(direct_arr):
     :returns: Nematic tensor
 
     """
-    lengths = np.linalg.norm(direct_arr, axis=1)
+    lengths = torch.norm(direct_arr, dim=1)
     unit_dirs = direct_arr / lengths[:, None]
     nematic_tensor_arr = (
-        np.einsum("ij,il->ijl", unit_dirs, unit_dirs) - np.eye(3)[:, :] / 3.0
+        torch.einsum("ij,il->ijl", unit_dirs, unit_dirs)
+        - torch.eye(3)[:, :].to(device) / 3.0
     )
     return nematic_tensor_arr
 
@@ -155,5 +156,36 @@ def make_structure_factor_torch(tQ_arr, tr_arr, tk_arr, device="cpu"):
 
     # Find structure factor
     Snm = torch.einsum("nij,mij->nm", tfQ_arr, tfQ_arr.conj())
+    # Account for n=m case
     Snm -= (2.0 / 3.0) * torch.eye(Snm.shape[0]).to(device)
     return torch.mean(Snm).real
+
+
+def make_structure_factor_torch_fast(
+    tQ_arr, tr_arr, tk_arr, chunk_size=10, device="cpu"
+):
+    """Make the structure factor from the fourier transform of the nematic tensor array
+
+    :fQ: Fourier transform of the nematic tensor array
+    :returns: Structure factor
+
+    """
+
+    kr = torch.einsum("ni,qi->nq", tr_arr, tk_arr)
+
+    tfQ_arr = torch.einsum("nij,nq->nijq", tQ_arr, (torch.cos(kr) + 1j * torch.sin(kr)))
+    del kr
+    torch.cuda.empty_cache()
+
+    # Find structure factor
+    n_chunks = tfQ_arr.shape[3] // chunk_size
+    chuncks = torch.chunk(tfQ_arr, n_chunks, dim=3)
+    S_arr = torch.zeros(tfQ_arr.shape[3]).to(device)
+    cur_ind = 0
+    for i, chunck in enumerate(chuncks):
+        Snm = torch.einsum("nijq,mijq->nmq", chunck, chunck.conj())
+        # Account for n=m case
+        Snm -= (2.0 / 3.0) * torch.eye(Snm.shape[0]).to(device)[:, :, None]
+        S_arr[cur_ind : cur_ind + Snm.shape[-1]] = torch.mean(Snm, dim=[0, 1]).real
+        cur_ind += Snm.shape[-1]
+    return S_arr
