@@ -41,6 +41,10 @@ def analyze_nematic_info(
         time_arr = h5_data["time"][:]
         sy_dat = h5_data["raw_data/sylinders"][...]
 
+    if len(time_arr) < ts_start:
+        print("Not enough time points to start analysis.")
+        return
+
     # Fix periodic boundary conditions
     sy_dat = aa.helpers.apply_pbc_to_raw_syl_data(
         sy_dat, box_lower, box_upper, device=device
@@ -152,13 +156,13 @@ def analyze_nematic_info(
 
 
 if __name__ == "__main__":
-    data_dirs = 
-    for 
-    analyze_nematic_info(
-        Path(
-            "/home/alamson/DATA/Motor_Inference/NemN8000ld5rho.5dte-5/analysis/raw_data.h5"
-        ),
-        k_points=100,
-        n_time_points=3,
-        ts_start=100,
-    )
+    main_test_dir = Path("/mnt/home/alamson/ceph/DATA/Motor_Inference/IsoNemTesting")
+
+    data_files = list(main_test_dir.glob("**/analysis/raw_data.h5"))
+    for h5_file in data_files:
+        analyze_nematic_info(
+            h5_file,
+            k_points=100,
+            n_time_points=100,
+            ts_start=100,
+        )
