@@ -50,9 +50,11 @@ def analyze_nematic_info(
         sy_dat, box_lower, box_upper, device=device
     )
 
-    # Store time array
+    # Store time array and run parameters
     with h5py.File(h5_file.parent / "nematic_analysis.h5", "w") as h5_nem_data:
         h5_nem_data.create_dataset("time", data=time_arr)
+        h5_nem_data.attrs["RunConfig"] = yaml.dump(param_dict)
+        h5_nem_data.attrs["ProteinConfig"] = yaml.dump(protein_dict)
 
     timer = Timer()
     # Calculate nematic order parameter
@@ -72,6 +74,9 @@ def analyze_nematic_info(
 
     # Calculate Q-tensor structure factor and fluctuations
     tk_arr = torch.logspace(-1, 2, k_points)
+    with h5py.File(h5_file.parent / "nematic_analysis.h5", "a") as h5_nem_data:
+        h5_nem_data.create_dataset("k", data=tk_arr.to("cpu"))
+
     tkx_arr = torch.vstack([tk_arr, torch.zeros(k_points), torch.zeros(k_points)]).T.to(
         device
     )
