@@ -161,9 +161,7 @@ def make_structure_factor_torch(tQ_arr, tr_arr, tk_arr, device="cpu"):
     return torch.mean(Snm).real
 
 
-def make_nematic_structure_factor_torch_fast(
-    tQ_arr, tr_arr, tk_arr, chunk_size=10, device="cpu"
-):
+def make_nematic_structure_factor(tQ_arr, tr_arr, tk_arr, chunk_size=10, device="cpu"):
     """Make the structure factor from the fourier transform of the nematic tensor array
 
     :fQ: Fourier transform of the nematic tensor array
@@ -178,12 +176,14 @@ def make_nematic_structure_factor_torch_fast(
     torch.cuda.empty_cache()
 
     # Find structure factor
+    S_arr = torch.zeros(tfQ_arr.shape[2]).to(device)
+    ## Prevent memory overflow with chunking
     n_chunks = tfQ_arr.shape[2] // chunk_size
     chuncks = torch.chunk(tfQ_arr, n_chunks, dim=2)
-    S_arr = torch.zeros(tfQ_arr.shape[2]).to(device)
     cur_ind = 0
     for i, chunck in enumerate(chuncks):
-        S = torch.einsum("ijq,ijq->q", chunck, chunck.conj())  # Account for n=m case
+        S = torch.einsum("ijq,ijq->q", chunck, chunck.conj())
+        # Account for n=m case
         S -= tr_arr.shape[0] * (2.0)
         S_arr[cur_ind : cur_ind + S.shape[-1]] = S / (tQ_arr.shape[0] ** 2)
 
@@ -212,7 +212,8 @@ def make_structure_factor_torch_fast(tr_arr, tk_arr, chunk_size=10, device="cpu"
     S_arr = torch.zeros(tfr_arr.shape[0]).to(device)
     cur_ind = 0
     for i, chunck in enumerate(chuncks):
-        S = torch.einsum("q,q->q", chunck, chunck.conj())  # Account for n=m case
+        S = torch.einsum("q,q->q", chunck, chunck.conj())
+        # Account for n=m case
         S -= tr_arr.shape[0] * (2.0)
         S_arr[cur_ind : cur_ind + S.shape[-1]] = S / (tr_arr.shape[0] ** 2)
 

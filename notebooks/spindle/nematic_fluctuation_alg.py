@@ -38,6 +38,7 @@ def analyze_nematic_info(
         protein_dict = yaml.load(h5_data.attrs["ProteinConfig"], Loader=yaml.FullLoader)
         box_lower = np.array(param_dict["simBoxLow"])
         box_upper = np.array(param_dict["simBoxHigh"])
+        box_size = box_upper - box_lower
         time_arr = h5_data["time"][:]
         sy_dat = h5_data["raw_data/sylinders"][...]
 
@@ -74,7 +75,8 @@ def analyze_nematic_info(
     timer.log()
 
     # Calculate Q-tensor structure factor and fluctuations
-    tk_arr = torch.logspace(-0.5, 1.5, k_points)
+    ## Assumes that the box is a cube
+    tk_arr = np.pi * ((2 * torch.range(1, k_points) + 1) / (box_size[0]))
     with h5py.File(h5_file.parent / "nematic_analysis_new.h5", "a") as h5_nem_data:
         h5_nem_data.create_dataset("k", data=tk_arr.to("cpu"))
 
@@ -106,14 +108,15 @@ def analyze_nematic_info(
         tcom = tcom_arr[:, :, time_ind]
 
         tQ_arr = aa.nematic_order.make_nematic_tensor_arr(tdir, device)
+        tQ_arr = torch.complex(tQ_arr, torch.zeros_like(tQ_arr))
 
-        Sx_time_arr[:, i] = aa.nematic_order.make_structure_factor_torch_fast(
+        Sx_time_arr[:, i] = aa.nematic_order.make_nematic_structure_factor(
             tQ_arr, tcom, tkx_arr, device=device
         )
-        Sy_time_arr[:, i] = aa.nematic_order.make_structure_factor_torch_fast(
+        Sy_time_arr[:, i] = aa.nematic_order.make_nematic_structure_factor(
             tQ_arr, tcom, tky_arr, device=device
         )
-        Sz_time_arr[:, i] = aa.nematic_order.make_structure_factor_torch_fast(
+        Sz_time_arr[:, i] = aa.nematic_order.make_nematic_structure_factor(
             tQ_arr, tcom, tkz_arr, device=device
         )
 
@@ -138,14 +141,15 @@ def analyze_nematic_info(
         tQ_arr = aa.nematic_order.make_nematic_tensor_arr(tdir, device)
         # We want to fluctuations
         tQ_arr -= tQ_arr.mean(axis=0)
+        tQ_arr = torch.complex(tQ_arr, torch.zeros_like(tQ_arr))
 
-        dSx_time_arr[:, i] = aa.nematic_order.make_structure_factor_torch_fast(
+        dSx_time_arr[:, i] = aa.nematic_order.make_nematic_structure_factor(
             tQ_arr, tcom, tkx_arr, device=device
         )
-        dSy_time_arr[:, i] = aa.nematic_order.make_structure_factor_torch_fast(
+        dSy_time_arr[:, i] = aa.nematic_order.make_nematic_structure_factor(
             tQ_arr, tcom, tky_arr, device=device
         )
-        dSz_time_arr[:, i] = aa.nematic_order.make_structure_factor_torch_fast(
+        dSz_time_arr[:, i] = aa.nematic_order.make_nematic_structure_factor(
             tQ_arr, tcom, tkz_arr, device=device
         )
 
@@ -169,6 +173,6 @@ if __name__ == "__main__":
         analyze_nematic_info(
             h5_file,
             k_points=100,
-            n_time_points=100,
+            n_time_points=200,
             ts_start=100,
         )
