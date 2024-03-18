@@ -51,15 +51,16 @@ def analyze_nematic_info(
     )
 
     # Store time array and run parameters
-    with h5py.File(h5_file.parent / "nematic_analysis.h5", "w") as h5_nem_data:
+    with h5py.File(h5_file.parent / "nematic_analysis_new.h5", "w") as h5_nem_data:
         h5_nem_data.create_dataset("time", data=time_arr)
         h5_nem_data.attrs["RunConfig"] = yaml.dump(param_dict)
         h5_nem_data.attrs["ProteinConfig"] = yaml.dump(protein_dict)
+        h5_nem_data["ts_start"] = ts_start
 
     timer = Timer()
     # Calculate nematic order parameter
     nematic_order = aa.nematic_order.calc_nematic_order(sy_dat)
-    with h5py.File(h5_file.parent / "nematic_analysis.h5", "a") as h5_nem_data:
+    with h5py.File(h5_file.parent / "nematic_analysis_new.h5", "a") as h5_nem_data:
         h5_nem_data.create_dataset("nematic_order", data=nematic_order)
     print("Made nematic order array")
     timer.log()
@@ -67,14 +68,14 @@ def analyze_nematic_info(
     # Calculate nematic director
     timer.milestone()
     nematic_director = aa.nematic_order.calc_nematic_director_arr(sy_dat, device=device)
-    with h5py.File(h5_file.parent / "nematic_analysis.h5", "a") as h5_nem_data:
+    with h5py.File(h5_file.parent / "nematic_analysis_new.h5", "a") as h5_nem_data:
         h5_nem_data.create_dataset("nematic_director", data=nematic_director)
     print("Made nematic director array")
     timer.log()
 
     # Calculate Q-tensor structure factor and fluctuations
-    tk_arr = torch.logspace(-1, 2, k_points)
-    with h5py.File(h5_file.parent / "nematic_analysis.h5", "a") as h5_nem_data:
+    tk_arr = torch.logspace(-0.5, 1.5, k_points)
+    with h5py.File(h5_file.parent / "nematic_analysis_new.h5", "a") as h5_nem_data:
         h5_nem_data.create_dataset("k", data=tk_arr.to("cpu"))
 
     tkx_arr = torch.vstack([tk_arr, torch.zeros(k_points), torch.zeros(k_points)]).T.to(
@@ -116,7 +117,7 @@ def analyze_nematic_info(
             tQ_arr, tcom, tkz_arr, device=device
         )
 
-    with h5py.File(h5_file.parent / "nematic_analysis.h5", "a") as h5_nem_data:
+    with h5py.File(h5_file.parent / "nematic_analysis_new.h5", "a") as h5_nem_data:
         h5_nem_data.create_dataset("nematic_structure_x", data=Sx_time_arr.to("cpu"))
         h5_nem_data.create_dataset("nematic_structure_y", data=Sy_time_arr.to("cpu"))
         h5_nem_data.create_dataset("nematic_structure_z", data=Sz_time_arr.to("cpu"))
@@ -148,7 +149,7 @@ def analyze_nematic_info(
             tQ_arr, tcom, tkz_arr, device=device
         )
 
-    with h5py.File(h5_file.parent / "nematic_analysis.h5", "a") as h5_nem_data:
+    with h5py.File(h5_file.parent / "nematic_analysis_new.h5", "a") as h5_nem_data:
         h5_nem_data.create_dataset("nematic_fluctuation_x", data=dSx_time_arr.to("cpu"))
         h5_nem_data.create_dataset("nematic_fluctuation_y", data=dSy_time_arr.to("cpu"))
         h5_nem_data.create_dataset("nematic_fluctuation_z", data=dSz_time_arr.to("cpu"))
