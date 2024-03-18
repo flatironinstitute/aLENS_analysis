@@ -161,7 +161,7 @@ def make_structure_factor_torch(tQ_arr, tr_arr, tk_arr, device="cpu"):
     return torch.mean(Snm).real
 
 
-def make_structure_factor_torch_fast(
+def make_nematic_structure_factor_torch_fast(
     tQ_arr, tr_arr, tk_arr, chunk_size=10, device="cpu"
 ):
     """Make the structure factor from the fourier transform of the nematic tensor array
@@ -173,19 +173,48 @@ def make_structure_factor_torch_fast(
 
     kr = torch.einsum("ni,qi->nq", tr_arr, tk_arr)
 
-    tfQ_arr = torch.einsum("nij,nq->nijq", tQ_arr, (torch.cos(kr) + 1j * torch.sin(kr)))
+    tfQ_arr = torch.einsum("nij,nq->ijq", tQ_arr, (torch.cos(kr) - 1j * torch.sin(kr)))
     del kr
     torch.cuda.empty_cache()
 
     # Find structure factor
-    n_chunks = tfQ_arr.shape[3] // chunk_size
-    chuncks = torch.chunk(tfQ_arr, n_chunks, dim=3)
-    S_arr = torch.zeros(tfQ_arr.shape[3]).to(device)
+    n_chunks = tfQ_arr.shape[2] // chunk_size
+    chuncks = torch.chunk(tfQ_arr, n_chunks, dim=2)
+    S_arr = torch.zeros(tfQ_arr.shape[2]).to(device)
     cur_ind = 0
     for i, chunck in enumerate(chuncks):
-        Snm = torch.einsum("nijq,mijq->nmq", chunck, chunck.conj())
-        # Account for n=m case
-        Snm -= (2.0 / 3.0) * torch.eye(Snm.shape[0]).to(device)[:, :, None]
-        S_arr[cur_ind : cur_ind + Snm.shape[-1]] = torch.mean(Snm, dim=[0, 1]).real
-        cur_ind += Snm.shape[-1]
+        S = torch.einsum("ijq,ijq->q", chunck, chunck.conj())  # Account for n=m case
+        S -= tr_arr.shape[0] * (2.0)
+        S_arr[cur_ind : cur_ind + S.shape[-1]] = S / (tQ_arr.shape[0] ** 2)
+
+        cur_ind += S.shape[-1]
+    return S_arr
+
+
+def make_structure_factor_torch_fast(tr_arr, tk_arr, chunk_size=10, device="cpu"):
+    """Make the structure factor from the fourier transform of the nematic tensor array
+
+    :fQ: Fourier transform of the nematic tensor array
+    :returns: Structure factor
+
+    """
+
+    kr = torch.einsum("ni,qi->nq", tr_arr, tk_arr)
+
+    # tfr_arr = torch.einsum("nq->q", torch.cos(kr) - 1j * torch.sin(kr))
+    tfr_arr = torch.einsum("nq->q", torch.exp(-1j * kr))
+    del kr
+    torch.cuda.empty_cache()
+
+    # Find structure factor
+    n_chunks = tfr_arr.shape[0] // chunk_size
+    chuncks = torch.chunk(tfr_arr, n_chunks, dim=0)
+    S_arr = torch.zeros(tfr_arr.shape[0]).to(device)
+    cur_ind = 0
+    for i, chunck in enumerate(chuncks):
+        S = torch.einsum("q,q->q", chunck, chunck.conj())  # Account for n=m case
+        S -= tr_arr.shape[0] * (2.0)
+        S_arr[cur_ind : cur_ind + S.shape[-1]] = S / (tr_arr.shape[0] ** 2)
+
+        cur_ind += S.shape[-1]
     return S_arr
