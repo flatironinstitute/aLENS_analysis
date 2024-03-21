@@ -76,7 +76,8 @@ def analyze_nematic_info(
 
     # Calculate Q-tensor structure factor and fluctuations
     ## Assumes that the box is a cube
-    tk_arr = np.pi * ((2 * torch.range(1, k_points) + 1) / (box_size[0]))
+    tk_arr = torch.arange(0, k_points)*(2. * np.pi / (box_size[0]))
+
     with h5py.File(h5_file.parent / "nematic_analysis_new.h5", "a") as h5_nem_data:
         h5_nem_data.create_dataset("k", data=tk_arr.to("cpu"))
 

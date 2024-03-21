@@ -124,7 +124,7 @@ def fourier_transform_nematic_tensor_arr(nematic_tensor_arr, r_arr, k=[0.0, 0.0,
     return fQ
 
 
-def make_structure_factor(Q_arr, r_arr, k):
+def make_structure_factor_old(Q_arr, r_arr, k):
     """Make the structure factor from the fourier transform of the nematic tensor array
 
     :fQ: Fourier transform of the nematic tensor array
@@ -202,7 +202,7 @@ def make_structure_factor_torch_fast(tr_arr, tk_arr, chunk_size=10, device="cpu"
     kr = torch.einsum("ni,qi->nq", tr_arr, tk_arr)
 
     # tfr_arr = torch.einsum("nq->q", torch.cos(kr) - 1j * torch.sin(kr))
-    tfr_arr = torch.einsum("nq->q", torch.exp(-1j * kr))
+    tfr_arr = torch.einsum("nq->q", torch.exp(-2j * kr))
     del kr
     torch.cuda.empty_cache()
 
@@ -219,3 +219,25 @@ def make_structure_factor_torch_fast(tr_arr, tk_arr, chunk_size=10, device="cpu"
 
         cur_ind += S.shape[-1]
     return S_arr
+
+def make_structure_factor(tr_arr, tk_arr, device="cpu", L=1.0):
+    """Make the structure factor from the fourier transform of the nematic tensor array
+
+    :fQ: Fourier transform of the nematic tensor array
+    :returns: Structure factor
+
+    """
+
+    kr = torch.einsum("ni,qi->nq", tr_arr, tk_arr)
+    print(kr)
+
+    # tfr_arr = torch.einsum("nq->q", torch.cos(kr) - 1j * torch.sin(kr))
+    tfr_arr = torch.einsum("nq->q", torch.exp(-1j * kr))
+    del kr
+    torch.cuda.empty_cache()
+
+    # Find structure factor
+    S_arr = torch.einsum("q,q->q", tfr_arr, tfr_arr.conj())
+    S_arr -= tr_arr.shape[0] * (2.0)
+
+    return S_arr/ (tr_arr.shape[0] ** 2)
