@@ -71,7 +71,7 @@ tree_length = 30  # min length of a cluster tree in time snapshots. = 15 sec
 
 colors = cycle(mcolors.XKCD_COLORS.keys())
 
-register_cmaps()
+# register_cmaps()
 # plt.rcParams['image.cmap'] = 'emct8'
 # plt.rcParams['image.cmap'] = 'warm'
 plt.rcParams["image.cmap"] = "YlOrRd"
@@ -81,7 +81,15 @@ plt.rcParams["image.cmap"] = "YlOrRd"
 
 
 def plot_confidence_int(
-    ax, time_arr, mean, std_dev, num_runs=12, color="b", ci=0.95, label="Mean", linestyle = '-',
+    ax,
+    time_arr,
+    mean,
+    std_dev,
+    num_runs=12,
+    color="b",
+    ci=0.95,
+    label="Mean",
+    linestyle="-",
 ):
     degrees_freedom = num_runs - 1
     confidence_interval = (
@@ -97,15 +105,17 @@ def plot_confidence_int(
         alpha=0.1,
     )
 
-def cluster_msd(com_arr, device='cpu'):
+
+def cluster_msd(com_arr, device="cpu"):
     tcom_arr = torch.from_numpy(com_arr).to(device)
     Ttot = com_arr.shape[-1]
     msd = torch.zeros(com_arr.shape, device=device)
     for i in range(1, Ttot):
         diff = tcom_arr[i:] - tcom_arr[:-i]
-        msd[i] = torch.pow(diff,2).mean(dim=-1)
+        msd[i] = torch.pow(diff, 2).mean(dim=-1)
 
     return msd.cpu().numpy()
+
 
 def cluster_analysis_graph(sim_path, part_min=40):
     flat_time_arr = []
@@ -338,6 +348,7 @@ def two_cond_free_energy_deriv(
     fe_deriv_polymer = calc_polymer_only_fe_deriv(l1 + l2, L, Lc, kappa)
     return fe_deriv_droplet + fe_deriv_polymer
 
+
 def single_cond_free_energy_deriv(
     ld: float,
     L: float,
@@ -347,7 +358,9 @@ def single_cond_free_energy_deriv(
     nu: float,
     kappa: float,
 ) -> float:
-    return calc_polymer_only_fe_deriv(ld, L, Lc, kappa) + calc_droplet_only_fe_deriv(ld, alpha, gamma, nu)
+    return calc_polymer_only_fe_deriv(ld, L, Lc, kappa) + calc_droplet_only_fe_deriv(
+        ld, alpha, gamma, nu
+    )
 
 
 def free_energy_two_identical_conds_continuous_deriv(
@@ -384,8 +397,10 @@ def free_energy_two_identical_conds_continuous_deriv(
         -12.0 * alpha * nu
         # Polymer term
         + (3.0 * kappa * (L**2))
-        * ((L**2 - 2 * L * (Lc - 2 * ld) + 2 * ((Lc - 2 * ld) ** 2))
-        / ((Lc - 2. * ld) ** 2 * (L - Lc + 2 * ld) ** 2))
+        * (
+            (L**2 - 2 * L * (Lc - 2 * ld) + 2 * ((Lc - 2 * ld) ** 2))
+            / ((Lc - 2.0 * ld) ** 2 * (L - Lc + 2 * ld) ** 2)
+        )
         # Surface tension term
         + (8 * np.power(6, 2.0 / 3.0) * alpha * gamma * np.cbrt(np.pi / (alpha * ld)))
     )
@@ -432,6 +447,7 @@ def calc_max_length_in_two_condensates(
     )
     return result.root
 
+
 def calc_max_length_in_single_condensate(
     L: float = 1.0,
     Lc: float = 1.0,
@@ -444,20 +460,16 @@ def calc_max_length_in_single_condensate(
     epsilon = 0.000001
     ld_lower_bound = epsilon  # Can't be zero,
     ld_upper_bound = Lc - (L + epsilon)
-      
+
     while (
-        single_cond_free_energy_deriv(
-            ld_lower_bound, L, Lc, nu, alpha, gamma, kappa
-        )
+        single_cond_free_energy_deriv(ld_lower_bound, L, Lc, nu, alpha, gamma, kappa)
         > 0
     ):
         ld_lower_bound += 0.05
 
     if (
         ld_lower_bound > ld_upper_bound
-        or single_cond_free_energy_deriv(
-            ld_upper_bound, L, Lc, nu, alpha, gamma, kappa
-        )
+        or single_cond_free_energy_deriv(ld_upper_bound, L, Lc, nu, alpha, gamma, kappa)
         < 0
     ):
         # No max was found, condensates would not exist
@@ -512,9 +524,8 @@ def tmerge_exact(x_sep, y_com, L, Lc, nu, gamma, alpha, kappa, b, beta, kmodes=1
 
     n_beads = int(Lc / b)
 
-
     # Get diffusion constant (This seems to be off by a factor of 4)
-    D =  b * b  # 2x a single condensate
+    D = b * b  # 2x a single condensate
 
     # Rescale
     x = x_sep / (2.0 * max_sep)
@@ -591,6 +602,7 @@ def calc_free_energy_two_blobs(
     term3 = ltot_beads * alpha * nu * bd
     return term1 + term2 - term3
 
+
 def find_avg_val_arr(time_arr_lst, val_arr_lst, n_timesteps=100):
     """Find the average value of multiple runs of a Gillespie time trial
 
@@ -612,8 +624,8 @@ def find_avg_val_arr(time_arr_lst, val_arr_lst, n_timesteps=100):
     max_t_lst = [t_arr[-1] for t_arr in time_arr_lst]
     t_max = np.max(max_t_lst)
     # Set up average arrays
-    avg_time_arr = np.linspace(0, t_max, n_timesteps+1)
-    avg_val_arr = np.zeros(n_timesteps+1)
+    avg_time_arr = np.linspace(0, t_max, n_timesteps + 1)
+    avg_val_arr = np.zeros(n_timesteps + 1)
 
     for time_arr, val_arr in zip(time_arr_lst, val_arr_lst):
         avg_val_arr += np.interp(avg_time_arr, time_arr, val_arr.flatten())
@@ -621,25 +633,29 @@ def find_avg_val_arr(time_arr_lst, val_arr_lst, n_timesteps=100):
     avg_val_arr /= len(val_arr_lst)
     return avg_time_arr, avg_val_arr
 
+
 def one_cond_size_continuous_deriv(t, state, nu, gamma, alpha, kappa, L, Lc, b, beta):
     dAdl = two_cond_free_energy_deriv(state, 0, L, Lc, alpha, gamma, nu, kappa)
     dl = 2.0 * b * (np.exp(-beta * b * dAdl) - 1.0)
     return [dl]
 
+
 def calc_regular_interval_kmc_array(time_arr, arr, tmax, interval):
     regular_time_arr = np.arange(0, tmax, interval)
-    indices = np.searchsorted(time_arr, regular_time_arr, side='right') - 1
+    indices = np.searchsorted(time_arr, regular_time_arr, side="right") - 1
     return regular_time_arr, arr[indices]
 
-def condensate_msd(com_arr, device='cpu'):
+
+def condensate_msd(com_arr, device="cpu"):
     tcom_arr = torch.from_numpy(com_arr).to(device)
     Ttot = com_arr.shape[-1]
     msd = torch.zeros(com_arr.shape, device=device)
     for i in range(1, Ttot):
-        diff = tcom_arr[:,i:] - tcom_arr[:,:-i]
-        msd[:,i] = torch.pow(diff,2).mean(dim=-1)
+        diff = tcom_arr[:, i:] - tcom_arr[:, :-i]
+        msd[:, i] = torch.pow(diff, 2).mean(dim=-1)
 
     return msd
+
 
 def mean_of_arrays(arrays):
     # Find the maximum length of the arrays
@@ -650,7 +666,7 @@ def mean_of_arrays(arrays):
 
     # Replace the first n elements of each row with the values from the corresponding array
     for i, arr in enumerate(arrays):
-        padded_arrays[i, :arr.shape[0]] = arr
+        padded_arrays[i, : arr.shape[0]] = arr
 
     # Compute the mean along the first axis, ignoring np.nan values
     mean = np.nanmean(padded_arrays, axis=0)
