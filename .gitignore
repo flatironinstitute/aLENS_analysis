@@ -4,7 +4,6 @@
 result*-*/
 result/
 rdf_**/
-**.png
 **.npy
 **.mtx
 **.dat
