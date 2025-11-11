@@ -152,3 +152,4 @@ dmypy.json
 
 # Specific files
 notebooks/chromatin_notebooks/corr_harm_well_test.h5
+notebooks/chromatin_notebooks/inference_files
