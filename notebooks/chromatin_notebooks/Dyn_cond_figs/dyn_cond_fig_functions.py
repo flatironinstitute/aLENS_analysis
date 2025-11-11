@@ -6,6 +6,8 @@ from pprint import pprint
 from pathlib import Path
 import h5py
 import warnings
+import math
+from typing import Iterable, List, Optional
 
 # Data manipulation
 import numpy as np
@@ -672,3 +674,98 @@ def mean_of_arrays(arrays):
     mean = np.nanmean(padded_arrays, axis=0)
 
     return mean
+
+
+def marko_siggia_tension(
+    x: float,  # extension (end-to-end distance) [m]
+    Lc: float,  # contour length [m]
+    *,
+    lp: float,  # persistence length [m]
+    kB: float = 1.380649e-23,  # Boltzmann constant [J/K]
+    T: float = 298.15,  # temperature [K]
+) -> float:
+    """
+    Return the axial tension F [N] in a worm-like chain at extension x.
+
+    Marko–Siggia formula:
+      F = (kB*T/lp) * (1/(4(1 - x/Lc)^2) - 1/4 + x/Lc)
+
+    Required:
+      - x (end-to-end distance = span between fixed points)
+      - Lc (contour length)
+      - lp (persistence length)
+
+    All inputs use SI units.
+    """
+    x_over_Lc = x / Lc
+    F = (kB * T / lp) * (1.0 / (4.0 * (1.0 - x_over_Lc) ** 2) - 0.25 + x_over_Lc)
+    return F
+
+
+def wlc_relaxation_times(
+    L: float,  # Separation between fixed ends [m]
+    *,
+    N: int = 5,
+    kappa: Optional[float] = None,  # bending rigidity [N·m^2]
+    lp: Optional[float] = None,  # persistence length [m]; if given, kappa = kB*T*lp
+    T: float = 298.15,  # temperature [K]
+    kB: float = 1.380649e-23,  # Boltzmann constant [J/K]
+    zeta_perp: Optional[float] = None,  # transverse drag per unit length [N·s/m^2]
+    eta: Optional[float] = None,  # solvent viscosity [Pa·s] if estimating zeta_perp
+    a: Optional[float] = None,  # filament radius [m] if estimating zeta_perp
+    delta_hydro: float = 0.5,  # O(1) hydrodynamic correction in zeta_perp
+    F: Optional[
+        float
+    ] = None,  # axial tension [N]; if None and Lc given, computed via Marko–Siggia
+    Lc: Optional[
+        float
+    ] = None,  # contour length [m] to compute F from extension x = L/Lc
+) -> List[float]:
+    """
+    Return the first N transverse relaxation times tau_n [s] for a worm-like chain segment.
+
+    Governing linearized overdamped dynamics for small transverse fluctuations y(x,t):
+        zeta_perp * ∂_t y = -kappa * ∂_x^4 y + F * ∂_x^2 y
+    → normal modes with rates (kappa q_n^4 + F q_n^2) / zeta_perp and
+       q_n determined by end constraints:
+         - hinged:   q_n = n*pi / L
+
+    Required:
+      - L (end-to-end distance = span between fixed points)
+      - Either kappa or lp (with T) to set elasticity
+      - Either zeta_perp, or (eta and a) to estimate it
+      - Either F, or Lc to compute F from Marko–Siggia given extension x=L/Lc
+
+    All inputs use SI units.
+    """
+    print("Calculating WLC relaxation times with parameters:")
+    print(f"  L = {L:.3e} um")
+    print(f"  Lc = {Lc:.3e} um" if Lc is not None else "  Lc = None")
+
+    if kappa is None and lp is None:
+        raise ValueError(
+            "Provide either bending rigidity kappa or persistence length lp."
+        )
+    if kappa is None:
+        kappa = kB * T * lp
+
+    if zeta_perp is None:
+        if eta is None or a is None:
+            raise ValueError("Provide zeta_perp, or eta and a to estimate it.")
+        # Slender-body estimate for perpendicular drag per unit length
+        zeta_perp = 4 * math.pi * eta / (math.log(L / a) + delta_hydro)
+
+    # If using Marko–Siggia, compute F properly:
+    if Lc is not None and (F == 0.0 or F is None):
+        x = L / Lc
+        # kappa = kB*T*lp ⇒ lp = kappa/(kB*T)
+        lp_eff = kappa / (kB * T)
+        F = marko_siggia_tension(x, Lc, lp=lp_eff, kB=kB, T=T)
+        print(f"Computed tension F = {F:.3e} pN from Marko–Siggia at x={x:.3f}")
+
+    # Eigenvalues q_n
+    q = [(n * math.pi) / L for n in range(1, N + 1)]
+
+    # Relaxation times tau_n = zeta_perp / (kappa q^4 + F q^2)
+    taus = [zeta_perp / (kappa * qi**4 + F * qi**2) for qi in q]
+    return taus
