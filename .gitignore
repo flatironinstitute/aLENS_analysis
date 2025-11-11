@@ -148,3 +148,6 @@ dmypy.json
 
 # Specific files
 notebooks/corr_harm_well_test.h5
+**.DS_Store
+**.zip
+
