@@ -6,6 +6,7 @@ Author: Adam Lamson
 Email: alamson@flatironinstitute.org
 Description:
 """
+
 # Basic useful imports
 import yaml
 import h5py
@@ -25,23 +26,30 @@ from itertools import cycle
 
 from ..helpers import contiguous_regions, Timer
 
-from .chrom_poly_stats import get_connect_torch_smat, get_connect_smat, connect_autocorr, connect_diag_autocorr
+from .chrom_poly_stats import (
+    get_connect_torch_smat,
+    get_connect_smat,
+    connect_autocorr,
+    connect_diag_autocorr,
+)
 
 
-def gauss_weighted_contact(sep_mat, sigma=.020, radius_arr=None):
+def gauss_weighted_contact(sep_mat, sigma=0.020, radius_arr=None):
     if radius_arr is not None:
         surface_mat = radius_arr[np.newaxis, :] + radius_arr[:, np.newaxis]
-        return np.exp(-np.power(sep_mat - surface_mat[:, :, np.newaxis], 2) /
-                      (2. * (sigma * sigma)))
-    return np.exp(-np.power(sep_mat, 2) / (2. * (sigma * sigma)))
+        return np.exp(
+            -np.power(sep_mat - surface_mat[:, :, np.newaxis], 2)
+            / (2.0 * (sigma * sigma))
+        )
+    return np.exp(-np.power(sep_mat, 2) / (2.0 * (sigma * sigma)))
 
 
-def log_gauss_weighted_contact(sep_mat, sigma=.020):
-    return -np.power(sep_mat, 2) / (2. * (sigma * sigma)) / np.log(10)
+def log_gauss_weighted_contact(sep_mat, sigma=0.020):
+    return -np.power(sep_mat, 2) / (2.0 * (sigma * sigma)) / np.log(10)
 
 
 def get_link_energy_arrays(h5_data, write=False):
-    """ Get the mean, standard deviation, and expected energy of all links in
+    """Get the mean, standard deviation, and expected energy of all links in
     a bead-spring chain
 
     @param h5_data HDF5 data file to analyze with all raw data about filaments
@@ -50,31 +58,32 @@ def get_link_energy_arrays(h5_data, write=False):
     @return: TODO
 
     """
-    sy_dat = h5_data['raw_data']['sylinders'][...]
-    params = yaml.safe_load(h5_data.attrs['RunConfig'])
-    k_spring = params['linkKappa']
-    kbt = params['KBT']
+    sy_dat = h5_data["raw_data"]["sylinders"][...]
+    params = yaml.safe_load(h5_data.attrs["RunConfig"])
+    k_spring = params["linkKappa"]
+    kbt = params["KBT"]
 
-    rest_length = params['linkGap'] + sy_dat[1:, 1, :] + sy_dat[:-1, 1, :]
+    rest_length = params["linkGap"] + sy_dat[1:, 1, :] + sy_dat[:-1, 1, :]
     sep_vec = sy_dat[1:, 2:5, :] - sy_dat[:-1, 5:8, :]
 
     sep_mag = np.linalg.norm(sep_vec, axis=1)
 
-    energy_arr = .5 * k_spring * np.power(sep_mag - rest_length, 2)
+    energy_arr = 0.5 * k_spring * np.power(sep_mag - rest_length, 2)
     mean_energy = np.mean(energy_arr, axis=0)
     sem_energy = stats.sem(energy_arr, axis=0)
-    expt_energy = kbt * \
-        (.5 - 1. /
-         (1. + (k_spring * rest_length[0, 0] * rest_length[0, 0] / kbt)))
+    expt_energy = kbt * (
+        0.5 - 1.0 / (1.0 + (k_spring * rest_length[0, 0] * rest_length[0, 0] / kbt))
+    )
     if write:
-        energy_dset = h5_data['analysis'].create_dataset(
-            'link_energy', data=np.stack(mean_energy, sem_energy))
-        energy_dset.attrs['nsylinders'] = energy_arr.shape[0]
+        energy_dset = h5_data["analysis"].create_dataset(
+            "link_energy", data=np.stack(mean_energy, sem_energy)
+        )
+        energy_dset.attrs["nsylinders"] = energy_arr.shape[0]
     return mean_energy, sem_energy, kbt, expt_energy
 
 
 def get_link_tension(h5_data, write=False):
-    """ Get the force on a bead for every time step
+    """Get the force on a bead for every time step
 
     @param h5_data HDF5 data file to analyze with all raw data about filaments
     @param write If true, will write data directly to the analysis group in
@@ -82,11 +91,11 @@ def get_link_tension(h5_data, write=False):
     @return: TODO
 
     """
-    sy_dat = h5_data['raw_data']['sylinders'][...]
-    params = yaml.safe_load(h5_data.attrs['RunConfig'])
-    k_spring = params['linkKappa']
+    sy_dat = h5_data["raw_data"]["sylinders"][...]
+    params = yaml.safe_load(h5_data.attrs["RunConfig"])
+    k_spring = params["extendLinkKappa"]
 
-    rest_length = params['linkGap'] + sy_dat[1:, 1, :] + sy_dat[:-1, 1, :]
+    rest_length = params["extendLinkGap"] + sy_dat[1:, 1, :] + sy_dat[:-1, 1, :]
     sep_vec = sy_dat[1:, 2:5, :] - sy_dat[:-1, 5:8, :]
 
     sep_mag = np.linalg.norm(sep_vec, axis=1)
@@ -104,11 +113,12 @@ def get_contact_kymo_data(contact_mat):
 
     """
     # Remove interaction with self
-    return (np.sum(contact_mat, axis=0) - 1)
+    return np.sum(contact_mat, axis=0) - 1
 
 
-def get_pos_kymo_data(h5_data, ts_range=(0, None), bead_range=(0, None), bins=100,
-                      analysis=None):
+def get_pos_kymo_data(
+    h5_data, ts_range=(0, None), bead_range=(0, None), bins=100, analysis=None
+):
     """Using center of all spheres, return a matrix with rows for n beads in a
     range along the axis of the two stationary end beads and columns for each
     time point in simulation.
@@ -119,50 +129,52 @@ def get_pos_kymo_data(h5_data, ts_range=(0, None), bead_range=(0, None), bins=10
 
     """
     # Get size of the system
-    params = yaml.safe_load(h5_data.attrs['RunConfig'])
-    sim_box_low = np.asarray(params['simBoxLow'])
-    sim_box_high = np.asarray(params['simBoxHigh'])
+    params = yaml.safe_load(h5_data.attrs["RunConfig"])
+    sim_box_low = np.asarray(params["simBoxLow"])
+    sim_box_high = np.asarray(params["simBoxHigh"])
     # Get center of mass of all beads for all times
-    sy_dat = h5_data['raw_data']['sylinders'][
-        bead_range[0]:bead_range[1], :, ts_range[0]:ts_range[-1]]
-    com_arr = .5 * (sy_dat[:, 2:5, :] + sy_dat[:, 5:8, :])
+    sy_dat = h5_data["raw_data"]["sylinders"][
+        bead_range[0] : bead_range[1], :, ts_range[0] : ts_range[-1]
+    ]
+    com_arr = 0.5 * (sy_dat[:, 2:5, :] + sy_dat[:, 5:8, :])
     # Project bead positions onto unit vector from first to last bead
     proj_vec = com_arr[-1, :, 0] - com_arr[0, :, 0]
     proj_vec /= np.linalg.norm(proj_vec)
-    proj_arr = np.einsum('ijk,j->ik', com_arr, proj_vec)
+    proj_arr = np.einsum("ijk,j->ik", com_arr, proj_vec)
     # Set range of histograms
     range_min = np.dot(sim_box_low, proj_vec)
     range_max = np.dot(sim_box_high, proj_vec)
     # Make a series of histograms for each time point
     hist_arr = []
     for i, proj in enumerate(proj_arr.T):
-        hist, bin_edges = np.histogram(proj, bins=bins,
-                                       range=(range_min, range_max))
+        hist, bin_edges = np.histogram(proj, bins=bins, range=(range_min, range_max))
         hist_arr += [hist]
 
     hist_arr = np.asarray(hist_arr).T
 
-    time_arr = h5_data['time'][ts_range[0]:ts_range[-1]]
+    time_arr = h5_data["time"][ts_range[0] : ts_range[-1]]
     if analysis is not None:
-        pos_kymo_dset = analysis.create_dataset('pos_kymo', data=hist_arr)
+        pos_kymo_dset = analysis.create_dataset("pos_kymo", data=hist_arr)
         pos_kymo_bin_edges = analysis.create_dataset(
-            'pos_kymo_bin_edges', data=bin_edges)
+            "pos_kymo_bin_edges", data=bin_edges
+        )
         # Metadata for analysis
-        pos_kymo_dset.attrs['bins'] = bins
-        pos_kymo_dset.attrs['range'] = (range_min, range_max)
-        pos_kymo_dset.attrs['timestep_range'] = ts_range
-        pos_kymo_dset.attrs['time_range'] = (time_arr[0], time_arr[-1])
+        pos_kymo_dset.attrs["bins"] = bins
+        pos_kymo_dset.attrs["range"] = (range_min, range_max)
+        pos_kymo_dset.attrs["timestep_range"] = ts_range
+        pos_kymo_dset.attrs["time_range"] = (time_arr[0], time_arr[-1])
         # pos_kymo_dset.attrs['bead_range'] =
-        pos_kymo_bin_edges.attrs['bins'] = bins
-        pos_kymo_bin_edges.attrs['range'] = (range_min, range_max)
-        pos_kymo_bin_edges.attrs['timestep_range'] = ts_range
-        pos_kymo_bin_edges.attrs['time_range'] = (time_arr[0], time_arr[-1])
+        pos_kymo_bin_edges.attrs["bins"] = bins
+        pos_kymo_bin_edges.attrs["range"] = (range_min, range_max)
+        pos_kymo_bin_edges.attrs["timestep_range"] = ts_range
+        pos_kymo_bin_edges.attrs["time_range"] = (time_arr[0], time_arr[-1])
         # pos_kymo_bin_edges.attrs['bead_range'] = bead_range
     return time_arr, hist_arr, bin_edges
 
 
-def get_contact_cond_data(time_arr, contact_kymo, threshold,
-                          bead_win=0, time_win=0, analysis=None):
+def get_contact_cond_data(
+    time_arr, contact_kymo, threshold, bead_win=0, time_win=0, analysis=None
+):
     """Given a contact kymo graph, finds condensates by regions that are above
     a certain contact threshold. This is done for every time point.
 
@@ -184,22 +196,22 @@ def get_contact_cond_data(time_arr, contact_kymo, threshold,
         for start, end in edges_inds:
             cond_edge_coords += [[t, start, end]]
         # if len(edge_inds) == 0:
-            # cond_edge_coords += [[t, 0, 0]]
+        # cond_edge_coords += [[t, 0, 0]]
 
     cond_edge_coords = np.asarray(cond_edge_coords)
     cond_num_arr = np.asarray(cond_num_arr)
     if analysis is not None:
-        cond_edges_dset = analysis.create_dataset('contact_cond_edges',
-                                                  data=cond_edge_coords)
-        cond_num_dset = analysis.create_dataset('contact_cond_num',
-                                                data=cond_num_arr)
+        cond_edges_dset = analysis.create_dataset(
+            "contact_cond_edges", data=cond_edge_coords
+        )
+        cond_num_dset = analysis.create_dataset("contact_cond_num", data=cond_num_arr)
         # Metadata for analysis
-        cond_edges_dset.attrs['threshold'] = threshold
-        cond_edges_dset.attrs['bead_win'] = bead_win
-        cond_edges_dset.attrs['times_win'] = time_win
-        cond_num_dset.attrs['threshold'] = threshold
-        cond_num_dset.attrs['bead_win'] = bead_win
-        cond_num_dset.attrs['times_win'] = time_win
+        cond_edges_dset.attrs["threshold"] = threshold
+        cond_edges_dset.attrs["bead_win"] = bead_win
+        cond_edges_dset.attrs["times_win"] = time_win
+        cond_num_dset.attrs["threshold"] = threshold
+        cond_num_dset.attrs["bead_win"] = bead_win
+        cond_num_dset.attrs["times_win"] = time_win
     return cond_edge_coords, cond_num_arr
 
 
@@ -220,8 +232,9 @@ def smooth_kymo_mat(mat, y_win=0, time_win=0):
     return smooth_kymo
 
 
-def get_pos_cond_data(time_arr, pos_kymo, bin_centers, threshold,
-                      bin_win=0, time_win=0, analysis=None):
+def get_pos_cond_data(
+    time_arr, pos_kymo, bin_centers, threshold, bin_win=0, time_win=0, analysis=None
+):
     """TODO: Docstring for get_contact_cond_data.
 
     @param time_arr TODO
@@ -246,17 +259,17 @@ def get_pos_cond_data(time_arr, pos_kymo, bin_centers, threshold,
     cond_num_arr = np.asarray(cond_num_arr)
     if analysis is not None:
         pos_cond_edge_dset = analysis.create_dataset(
-            'pos_cond_edges', data=cond_edge_coords)
-        pos_cond_num_dset = analysis.create_dataset(
-            'pos_cond_num', data=cond_num_arr)
-        pos_cond_edge_dset.attrs['time_range'] = (time_arr[0], time_arr[-1])
-        pos_cond_edge_dset.attrs['threshold'] = threshold
-        pos_cond_edge_dset.attrs['bin_win'] = bin_win
-        pos_cond_edge_dset.attrs['time_win'] = time_win
-        pos_cond_num_dset.attrs['time_range'] = (time_arr[0], time_arr[-1])
-        pos_cond_num_dset.attrs['threshold'] = threshold
-        pos_cond_num_dset.attrs['bin_win'] = bin_win
-        pos_cond_num_dset.attrs['time_win'] = time_win
+            "pos_cond_edges", data=cond_edge_coords
+        )
+        pos_cond_num_dset = analysis.create_dataset("pos_cond_num", data=cond_num_arr)
+        pos_cond_edge_dset.attrs["time_range"] = (time_arr[0], time_arr[-1])
+        pos_cond_edge_dset.attrs["threshold"] = threshold
+        pos_cond_edge_dset.attrs["bin_win"] = bin_win
+        pos_cond_edge_dset.attrs["time_win"] = time_win
+        pos_cond_num_dset.attrs["time_range"] = (time_arr[0], time_arr[-1])
+        pos_cond_num_dset.attrs["threshold"] = threshold
+        pos_cond_num_dset.attrs["bin_win"] = bin_win
+        pos_cond_num_dset.attrs["time_win"] = time_win
     return cond_edge_coords, cond_num_arr
 
 
@@ -267,17 +280,18 @@ def get_sep_hist(h5_data, nbins=100, ss_ind=0, write=False):
     @return: TODO
 
     """
-    params = yaml.safe_load(h5_data.attrs['RunConfig'])
-    hist_min = params['sylinderDiameter'] * .8
-    hist_max = params['sylinderDiameter'] * 1.2
+    params = yaml.safe_load(h5_data.attrs["RunConfig"])
+    hist_min = params["sylinderDiameter"] * 0.8
+    hist_max = params["sylinderDiameter"] * 1.2
 
     dist_hist = []
     dist_mat = get_sep_dist_mat(h5_data, ss_ind)
 
     for i in range(dist_mat.shape[-1]):
         hist, bin_edges = np.histogram(
-            dist_mat[:, :, i].flatten(), nbins, range=(hist_min, hist_max))
-        dist_hist += [hist * .5]
+            dist_mat[:, :, i].flatten(), nbins, range=(hist_min, hist_max)
+        )
+        dist_hist += [hist * 0.5]
 
     return dist_hist, bin_edges
 
@@ -290,15 +304,16 @@ def get_sep_dist_mat(h5_data, ss_ind=0, bead_range=None, write=False):
     @return: TODO
 
     """
-    sy_dat = h5_data['raw_data']['sylinders'][...]
+    sy_dat = h5_data["raw_data"]["sylinders"][...]
 
-    com_arr = .5 * (sy_dat[:, 2:5, :] + sy_dat[:, 5:8, :])
+    com_arr = 0.5 * (sy_dat[:, 2:5, :] + sy_dat[:, 5:8, :])
     if bead_range is not None:
-        com_arr = com_arr[bead_range[0]:bead_range[1]]
+        com_arr = com_arr[bead_range[0] : bead_range[1]]
 
-    dist_mat = np.linalg.norm((com_arr[:, np.newaxis, :, ss_ind:] -
-                               com_arr[np.newaxis, :, :, ss_ind:]),
-                              axis=2)
+    dist_mat = np.linalg.norm(
+        (com_arr[:, np.newaxis, :, ss_ind:] - com_arr[np.newaxis, :, :, ss_ind:]),
+        axis=2,
+    )
 
     return dist_mat
 
@@ -312,10 +327,11 @@ def get_overlap_arrs(dist_mat, sy_diam):
 
     """
     is_overlap_mat = (dist_mat < sy_diam).astype(int)
-    num_overlap = .5 * (is_overlap_mat.sum(axis=(0, 1))
-                        - dist_mat.shape[0])  # remove self-overlap
-    overlap_dist_mat = np.einsum('ijk, ijk -> ijk', dist_mat, is_overlap_mat)
-    avg_overlap_arr = (.5 * overlap_dist_mat.sum(axis=(0, 1))) / num_overlap
+    num_overlap = 0.5 * (
+        is_overlap_mat.sum(axis=(0, 1)) - dist_mat.shape[0]
+    )  # remove self-overlap
+    overlap_dist_mat = np.einsum("ijk, ijk -> ijk", dist_mat, is_overlap_mat)
+    avg_overlap_arr = (0.5 * overlap_dist_mat.sum(axis=(0, 1))) / num_overlap
     min_overlap_arr = np.ma.masked_values(overlap_dist_mat, 0).min(axis=(0, 1))
 
     return num_overlap, avg_overlap_arr, min_overlap_arr
@@ -330,7 +346,7 @@ def autocorr_bead_pos(com_arr, ignore_id=None):
 
     """
 
-    #com_rel_arr = com_arr - com_arr.mean(axis=-1)[:, :, np.newaxis]
+    # com_rel_arr = com_arr - com_arr.mean(axis=-1)[:, :, np.newaxis]
     com_rel_arr = com_arr[...]
 
     if ignore_id is not None:
@@ -340,15 +356,15 @@ def autocorr_bead_pos(com_arr, ignore_id=None):
     auto_corr = np.zeros((nbeads, nsteps))
     for t in range(nsteps):
         for j in range(nsteps - t):
-            auto_corr[:, t] += np.einsum('ij,ij->i', com_rel_arr[:, :, t + j],
-                                         com_rel_arr[:, :, j])
-        auto_corr[:, t] /= (nsteps - t)
+            auto_corr[:, t] += np.einsum(
+                "ij,ij->i", com_rel_arr[:, :, t + j], com_rel_arr[:, :, j]
+            )
+        auto_corr[:, t] /= nsteps - t
 
     return auto_corr
 
 
-def distr_hists(pos_mat, free_frac_chain=.5,
-                rel_ind=0, nbins=100, hist_max=1.):
+def distr_hists(pos_mat, free_frac_chain=0.5, rel_ind=0, nbins=100, hist_max=1.0):
     """TODO: Docstring for radial_distr.
     @param pos_mat TODO
     @param free_frac_chain TODO
@@ -363,13 +379,17 @@ def distr_hists(pos_mat, free_frac_chain=.5,
     dist_arr = np.linalg.norm(rel_vec_arr, axis=0)
 
     dist_hist, dist_bin_edges = np.histogram(
-        dist_arr, nbins, range=[0, hist_max], density=True)
+        dist_arr, nbins, range=[0, hist_max], density=True
+    )
     z_rho_hist, rho_bin_edges, z_bin_edges = np.histogram2d(
-        np.linalg.norm(rel_vec_arr[:-1, :], axis=0), rel_vec_arr[-1, :],
-        int(nbins / 2), range=[[0, hist_max], [-hist_max, hist_max]], density=True)
+        np.linalg.norm(rel_vec_arr[:-1, :], axis=0),
+        rel_vec_arr[-1, :],
+        int(nbins / 2),
+        range=[[0, hist_max], [-hist_max, hist_max]],
+        density=True,
+    )
 
-    return ((dist_hist, dist_bin_edges),
-            (z_rho_hist, rho_bin_edges, z_bin_edges))
+    return ((dist_hist, dist_bin_edges), (z_rho_hist, rho_bin_edges, z_bin_edges))
 
 
 def total_distr_hists(pos_mat, rel_ind=0, nbins=100, hist_max=1):
@@ -384,17 +404,20 @@ def total_distr_hists(pos_mat, rel_ind=0, nbins=100, hist_max=1):
     dist_arr = np.linalg.norm(rel_vec_arr, axis=1).flatten()
 
     dist_hist, dist_bin_edges = np.histogram(
-        dist_arr, nbins, range=[0, hist_max], density=True)
+        dist_arr, nbins, range=[0, hist_max], density=True
+    )
     z_rho_hist, rho_bin_edges, z_bin_edges = np.histogram2d(
         np.linalg.norm(rel_vec_arr[:, :-1, :], axis=1).flatten(),
-        rel_vec_arr[:, -1, :].flatten(), int(nbins / 2),
-        range=[[0, hist_max], [-hist_max, hist_max]], density=True)
+        rel_vec_arr[:, -1, :].flatten(),
+        int(nbins / 2),
+        range=[[0, hist_max], [-hist_max, hist_max]],
+        density=True,
+    )
 
-    return ((dist_hist, dist_bin_edges),
-            (z_rho_hist, rho_bin_edges, z_bin_edges))
+    return ((dist_hist, dist_bin_edges), (z_rho_hist, rho_bin_edges, z_bin_edges))
 
 
-def cart_distr_hists(pos_mat, rel_pos, e0_ind, e1_ind, nbins=100, hist_max=1.):
+def cart_distr_hists(pos_mat, rel_pos, e0_ind, e1_ind, nbins=100, hist_max=1.0):
     """TODO: Docstring for radial_distr.
     @param pos_mat TODO
     @param rel_ind TODO
@@ -406,12 +429,14 @@ def cart_distr_hists(pos_mat, rel_pos, e0_ind, e1_ind, nbins=100, hist_max=1.):
         rel_vec_arr[:, e0_ind, :].flatten(),
         rel_vec_arr[:, e1_ind, :].flatten(),
         int(nbins / 2),
-        range=[[-hist_max, hist_max], [-hist_max, hist_max]], density=True)
+        range=[[-hist_max, hist_max], [-hist_max, hist_max]],
+        density=True,
+    )
 
     return (e0_e1_hist, e0_edges, e1_edges)
 
 
-def cylin_distr_hists(pos_mat, zero_pos, z_uvec, nbins=100, hist_max=1.):
+def cylin_distr_hists(pos_mat, zero_pos, z_uvec, nbins=100, hist_max=1.0):
     """TODO: Docstring for cylindrical histogram.
     @param pos_mat TODO
     @param rel_ind TODO
@@ -419,17 +444,22 @@ def cylin_distr_hists(pos_mat, zero_pos, z_uvec, nbins=100, hist_max=1.):
     @return: TODO
     """
     rel_vec_arr = pos_mat - (zero_pos)[np.newaxis, :, :]
-    z_proj_arr = np.einsum('ijk,jk->ik', rel_vec_arr, z_uvec)
+    z_proj_arr = np.einsum("ijk,jk->ik", rel_vec_arr, z_uvec)
     rho_proj_arr = np.linalg.norm(
-        rel_vec_arr - np.einsum('jk,ik->ijk', z_uvec, z_proj_arr), axis=1)
+        rel_vec_arr - np.einsum("jk,ik->ijk", z_uvec, z_proj_arr), axis=1
+    )
     rho_z_hist, rho_bin_edges, z_bin_edges = np.histogram2d(
-        rho_proj_arr.flatten(), z_proj_arr.flatten(), int(nbins / 2),
-        range=[[0, hist_max], [-hist_max, hist_max]], density=True)
+        rho_proj_arr.flatten(),
+        z_proj_arr.flatten(),
+        int(nbins / 2),
+        range=[[0, hist_max], [-hist_max, hist_max]],
+        density=True,
+    )
 
     return (rho_z_hist, rho_bin_edges, z_bin_edges)
 
 
-def rad_distr_hists(pos_mat, zero_pos, nbins=100, hist_max=1.):
+def rad_distr_hists(pos_mat, zero_pos, nbins=100, hist_max=1.0):
     """TODO: Docstring for cylindrical histogram.
     @param pos_mat TODO
     @param nbins TODO
@@ -439,25 +469,26 @@ def rad_distr_hists(pos_mat, zero_pos, nbins=100, hist_max=1.):
     rad_arr = np.linalg.norm(rel_vec_arr, axis=1).flatten()
 
     rad_hist, rad_bin_edges = np.histogram(
-        rad_arr, nbins, range=[
-            0, hist_max], density=True)
+        rad_arr, nbins, range=[0, hist_max], density=True
+    )
     return (rad_hist, rad_bin_edges)
 
 
-def rad_distr_func_at_t(dist_mat, nbins=100, hist_max=1., orig_density=1):
-    """ Get the radial distribution function for a selection of beads
+def rad_distr_func_at_t(dist_mat, nbins=100, hist_max=1.0, orig_density=1):
+    """Get the radial distribution function for a selection of beads
     @param pos_mat TODO
     @param nbins TODO
     @return: TODO
     """
 
     rad_distr_func, rad_bin_edges = np.histogram(
-        dist_mat.flatten(), nbins, range=[
-            0, hist_max], density=False)
+        dist_mat.flatten(), nbins, range=[0, hist_max], density=False
+    )
     dr = rad_bin_edges[1:] - rad_bin_edges[:-1]
-    rad = .5 * (rad_bin_edges[1:] + rad_bin_edges[:-1])
+    rad = 0.5 * (rad_bin_edges[1:] + rad_bin_edges[:-1])
     rad_distr_func = np.divide(
-        rad_distr_func, np.pi * np.power(rad, 2.) * dr * orig_density * dist_mat.size)
+        rad_distr_func, np.pi * np.power(rad, 2.0) * dr * orig_density * dist_mat.size
+    )
     return (rad_distr_func, rad_bin_edges)
 
 
@@ -465,16 +496,17 @@ def get_all_rog_stats(pos_mat, rel_ind=0):
     rel_vec_arr = pos_mat - (pos_mat[rel_ind])[np.newaxis, :, :]
     pos_avg_arr = rel_vec_arr.mean(axis=2)
     pos_std_arr = rel_vec_arr.std(axis=2)
-    #pos_mean_sqr_arr = np.mean(np.einsum('ijk,ijk->ik',rel_vec_arr, rel_vec_arr), axis=1)
+    # pos_mean_sqr_arr = np.mean(np.einsum('ijk,ijk->ik',rel_vec_arr, rel_vec_arr), axis=1)
     rad_pos_arr = np.linalg.norm(rel_vec_arr, axis=1)
     rad_mean_arr = np.power(rad_pos_arr, 2).mean(axis=1)
     rad_std_arr = rad_pos_arr.std(axis=1)
 
-    return(pos_avg_arr, pos_std_arr, rad_mean_arr, rad_std_arr)
+    return (pos_avg_arr, pos_std_arr, rad_mean_arr, rad_std_arr)
 
 
-def get_contact_mat_analysis(com_arr, sigma=.02, avg_block_step=1, log=True,
-                             radius_arr=None, h5_obj=None):
+def get_contact_mat_analysis(
+    com_arr, sigma=0.02, avg_block_step=1, log=True, radius_arr=None, h5_obj=None
+):
     """Generate (and store if given an HDF5 directory) all analysis related to
     contact matrices related to chromatin. This is includes separation matrix at
     every time point (this is not stored because of the size), average contact
@@ -508,7 +540,9 @@ def get_contact_mat_analysis(com_arr, sigma=.02, avg_block_step=1, log=True,
 
     for i in range(reduc_com_arr.shape[-1]):
         sep_mat = np.linalg.norm(
-            reduc_com_arr[:, np.newaxis, :, i] - reduc_com_arr[np.newaxis, :, :, i], axis=2)
+            reduc_com_arr[:, np.newaxis, :, i] - reduc_com_arr[np.newaxis, :, :, i],
+            axis=2,
+        )
         contact_mat = gauss_weighted_contact(sep_mat, sigma)
         contact_kymo[:, i] = get_contact_kymo_data(contact_mat)
         avg_contact_mat += contact_mat
@@ -517,21 +551,21 @@ def get_contact_mat_analysis(com_arr, sigma=.02, avg_block_step=1, log=True,
         avg_contact_mat = np.log(avg_contact_mat)
 
     if h5_obj is not None:
-        avg_contact_mat_dset = h5_obj.create_dataset('avg_contact_mat',
-                                                     data=avg_contact_mat)
-        avg_contact_mat_dset.attrs['sigma'] = sigma
-        avg_contact_mat_dset.attrs['avg_block_step'] = avg_block_step
-        avg_contact_mat_dset.attrs['log'] = log
+        avg_contact_mat_dset = h5_obj.create_dataset(
+            "avg_contact_mat", data=avg_contact_mat
+        )
+        avg_contact_mat_dset.attrs["sigma"] = sigma
+        avg_contact_mat_dset.attrs["avg_block_step"] = avg_block_step
+        avg_contact_mat_dset.attrs["log"] = log
 
-        contact_kymo_dset = h5_obj.create_dataset('contact_kymo',
-                                                  data=contact_kymo)
-        contact_kymo_dset.attrs['sigma'] = sigma
-        contact_kymo_dset.attrs['avg_block_step'] = avg_block_step
-        contact_kymo_dset.attrs['log'] = log
+        contact_kymo_dset = h5_obj.create_dataset("contact_kymo", data=contact_kymo)
+        contact_kymo_dset.attrs["sigma"] = sigma
+        contact_kymo_dset.attrs["avg_block_step"] = avg_block_step
+        contact_kymo_dset.attrs["log"] = log
 
         if radius_arr is not None:
-            avg_contact_mat_dset.attrs['radius_arr'] = radius_arr
-            contact_kymo_dset.attrs['radius_arr'] = radius_arr
+            avg_contact_mat_dset.attrs["radius_arr"] = radius_arr
+            contact_kymo_dset.attrs["radius_arr"] = radius_arr
     return avg_contact_mat, contact_kymo
 
 
@@ -539,7 +573,7 @@ def get_end_end_distance(com_arr):
     return np.linalg.norm(com_arr[0, :, :] - com_arr[-1, :, :], axis=0)
 
 
-def calc_rad_of_gyration(com_arr, device='cpu'):
+def calc_rad_of_gyration(com_arr, device="cpu"):
     """Calculate the radius of gyration of filament
 
     @param com_arr TODO
@@ -552,45 +586,45 @@ def calc_rad_of_gyration(com_arr, device='cpu'):
 
     n_beads = float(rel_pos_arr.size(0))
 
-    rog_sqr_arr = torch.einsum(
-        'ijk,ijk->k', rel_pos_arr, rel_pos_arr) / n_beads
+    rog_sqr_arr = torch.einsum("ijk,ijk->k", rel_pos_arr, rel_pos_arr) / n_beads
     return torch.sqrt(rog_sqr_arr)
 
 
 def find_neighbors(com_arr, diam, time_ind=0):
-    """Find beads that are in close proximity with one another at any given time.
-
-    """
-    neighbor_mat = (np.linalg.norm((com_arr[:, np.newaxis, :, time_ind] -
-                                    com_arr[np.newaxis, :, :, time_ind]),
-                                   axis=2) < diam * 1.2).astype(int)
+    """Find beads that are in close proximity with one another at any given time."""
+    neighbor_mat = (
+        np.linalg.norm(
+            (com_arr[:, np.newaxis, :, time_ind] - com_arr[np.newaxis, :, :, time_ind]),
+            axis=2,
+        )
+        < diam * 1.2
+    ).astype(int)
     return neighbor_mat
 
 
-def create_connect_hdf5(h5_raw_path, force=False, verbose=False,
-                        start_ind=0,
-                        end_ind=None):
+def create_connect_hdf5(
+    h5_raw_path, force=False, verbose=False, start_ind=0, end_ind=None
+):
     # Create path for cluster data file
-    connect_path = (h5_raw_path.parent /
-                    f'connect_diag_analysis.h5')
+    connect_path = h5_raw_path.parent / f"connect_diag_analysis.h5"
     if connect_path.exists():
         if not force:
             print(
-                f"Warning: connect data file {connect_path.name} exists and was not overwritten.")
+                f"Warning: connect data file {connect_path.name} exists and was not overwritten."
+            )
             return
         connect_path.unlink()
 
     # Run analysis
-    with h5py.File(h5_raw_path, 'r') as h5_data:
-        time_arr = h5_data['time'][start_ind:end_ind]
+    with h5py.File(h5_raw_path, "r") as h5_data:
+        time_arr = h5_data["time"][start_ind:end_ind]
         lag_time_arr = time_arr - time_arr[0]
-        prot_dat = h5_data['raw_data/proteins'][:, :, start_ind:end_ind]
-        bead_num = h5_data['raw_data/sylinders'][...].shape[0]
+        prot_dat = h5_data["raw_data/proteins"][:, :, start_ind:end_ind]
+        bead_num = h5_data["raw_data/sylinders"][...].shape[0]
         connect_mat_list = []
         # timer = Timer()
         for i in range(time_arr.size):
-            connect_mat_list += [get_connect_torch_smat(
-                prot_dat[:, :, i], bead_num)]
+            connect_mat_list += [get_connect_torch_smat(prot_dat[:, :, i], bead_num)]
         # timer.log()
 
         # timer.milestone()
@@ -599,19 +633,20 @@ def create_connect_hdf5(h5_raw_path, force=False, verbose=False,
         avg_connect_mat = avg_connect_mat.to_dense().numpy() / n
         # timer.log()
 
-    with h5py.File(connect_path, 'w') as h5_cnct:
-        _ = h5_cnct.create_dataset('time', data=time_arr)
-        _ = h5_cnct.create_dataset('lag_time', data=lag_time_arr)
-        _ = h5_cnct.create_dataset('avg_connect_mat', data=avg_connect_mat)
+    with h5py.File(connect_path, "w") as h5_cnct:
+        _ = h5_cnct.create_dataset("time", data=time_arr)
+        _ = h5_cnct.create_dataset("lag_time", data=lag_time_arr)
+        _ = h5_cnct.create_dataset("avg_connect_mat", data=avg_connect_mat)
 
         # timer.milestone()
         ac_arr = connect_diag_autocorr(connect_mat_list[:])
-        _ = h5_cnct.create_dataset('autocorr', data=ac_arr)
+        _ = h5_cnct.create_dataset("autocorr", data=ac_arr)
         # timer.log()
 
 
-def create_contact_hdf5(h5_raw_path, force=False,
-                        verbose=False, start_ind=0, end_ind=None):
+def create_contact_hdf5(
+    h5_raw_path, force=False, verbose=False, start_ind=0, end_ind=None
+):
     """TODO: Docstring for create_contact_hdf5.
 
     @param h5_raw_path TODO
@@ -622,23 +657,23 @@ def create_contact_hdf5(h5_raw_path, force=False,
     @return: TODO
 
     """
-    contact_path = (h5_raw_path.parent /
-                    f'contact_analysis.h5')
+    contact_path = h5_raw_path.parent / f"contact_analysis.h5"
     if contact_path.exists():
         if not force:
             print(
-                f"Warning: connect data file {contact_path.name} exists and was NOT overwritten.")
+                f"Warning: connect data file {contact_path.name} exists and was NOT overwritten."
+            )
             return
         contact_path.unlink()
 
     # Run analysis
-    with h5py.File(h5_raw_path, 'r') as h5_data:
-        time_arr = h5_data['time'][start_ind:end_ind]
-        sy_dat = h5_data['raw_data/sylinders'][:, :, start_ind:end_ind]
-        com_arr = .5 * (sy_dat[:, 2:5, :] + sy_dat[:, 5:8, :])
+    with h5py.File(h5_raw_path, "r") as h5_data:
+        time_arr = h5_data["time"][start_ind:end_ind]
+        sy_dat = h5_data["raw_data/sylinders"][:, :, start_ind:end_ind]
+        com_arr = 0.5 * (sy_dat[:, 2:5, :] + sy_dat[:, 5:8, :])
 
-    with h5py.File(contact_path, 'w') as h5_contact:
-        _ = h5_contact.create_dataset('time', data=time_arr)
+    with h5py.File(contact_path, "w") as h5_contact:
+        _ = h5_contact.create_dataset("time", data=time_arr)
         _ = get_contact_mat_analysis(com_arr, h5_obj=h5_contact)
 
 
