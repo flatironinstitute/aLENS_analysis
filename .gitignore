@@ -13,6 +13,8 @@ rdf_**/
 **.hdf5
 **.log
 **.out
+**.eps
+**.pdf
 
 
 # Byte-compiled / optimized / DLL files

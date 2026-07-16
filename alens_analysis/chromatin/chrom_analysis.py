@@ -82,7 +82,7 @@ def get_link_energy_arrays(h5_data, write=False):
     return mean_energy, sem_energy, kbt, expt_energy
 
 
-def get_link_tension(h5_data, write=False):
+def get_link_tension(h5_data):
     """Get the force on a bead for every time step
 
     @param h5_data HDF5 data file to analyze with all raw data about filaments
@@ -102,6 +102,30 @@ def get_link_tension(h5_data, write=False):
 
     tension_arr = k_spring * (sep_mag - rest_length)
     return tension_arr
+
+
+def get_link_tension_along_chain(h5_data, vec=(1, 0, 0)):
+    """Get the force on a bead for every time step projected along a vector
+
+    @param h5_data HDF5 data file to analyze with all raw data about filaments
+    @param write If true, will write data directly to the analysis group in
+                 the h5_data file.
+    @return: TODO
+    """
+
+    sy_dat = h5_data["raw_data"]["sylinders"][...]
+    params = yaml.safe_load(h5_data.attrs["RunConfig"])
+    k_spring = params["extendLinkKappa"]
+
+    rest_length = params["extendLinkGap"] + sy_dat[1:, 1, :] + sy_dat[:-1, 1, :]
+    sep_vec = sy_dat[1:, 2:5, :] - sy_dat[:-1, 5:8, :]
+    proj_vec = np.asarray(vec) / np.linalg.norm(vec)
+    sep_mag = np.linalg.norm(sep_vec, axis=1)
+    tension_arr = (k_spring * (1.0 - (rest_length / sep_mag)))[
+        :, np.newaxis, :
+    ] * sep_vec
+    proj_tension = np.einsum("ijk,j->ik", tension_arr, proj_vec)
+    return proj_tension
 
 
 def get_contact_kymo_data(contact_mat):
