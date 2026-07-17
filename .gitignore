@@ -14,7 +14,7 @@ rdf_**/
 **.log
 **.out
 **.eps
-**.pdf
+**supp*.pdf
 
 
 # Byte-compiled / optimized / DLL files
